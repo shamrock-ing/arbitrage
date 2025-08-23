@@ -1,7 +1,8 @@
+import os
 # === Backpack.tf API credentials ===
 # Ключ берётся тут: https://backpack.tf/developer (нужен доступ к classifieds API)
 
-BPTF_TOKEN = "a1BwJUW/CHggLArNv6KFVxlHLoshHNRFhV/4naZ3/Kw="         
+BPTF_TOKEN = os.getenv("BPTF_TOKEN")         
 
 STEAM_ID = "76561198189472678"             
 
