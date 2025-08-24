@@ -190,6 +190,7 @@ class UpgradeArbitrage:
 
 					# Парсим атрибуты предмета
 					item_attrs = parse_item_attributes(item)
+					logger.info(f"[Arbitrage][BUY] Атрибуты {item}: quality={item_attrs['quality']}, killstreak_tier={item_attrs['killstreak_tier']}, australium={item_attrs['australium']}, base_name='{item_attrs['base_name']}'")
 					item_enc = quote(item_attrs["base_name"], safe="")
 					
 					# Определяем параметр australium
@@ -297,6 +298,7 @@ class UpgradeArbitrage:
 
 					# Парсим атрибуты предмета
 					item_attrs = parse_item_attributes(item)
+					logger.info(f"[Arbitrage][SELL] Атрибуты {item}: quality={item_attrs['quality']}, killstreak_tier={item_attrs['killstreak_tier']}, australium={item_attrs['australium']}, base_name='{item_attrs['base_name']}'")
 					
 					# Определяем quality string для stats URL
 					if item_attrs["quality"] == 11:
@@ -306,16 +308,19 @@ class UpgradeArbitrage:
 					
 					item_enc = quote(item_attrs["base_name"], safe="")
 					
-					# Для australium предметов используем специальный путь
+					# Строим URL с учётом всех атрибутов
+					base_url = f"https://backpack.tf/stats/{quality_str}/{item_enc}/Tradable/Craftable"
+					
+					# Для australium предметов добавляем /Australium
 					if item_attrs["australium"]:
-						url = f"https://backpack.tf/stats/{quality_str}/{item_enc}/Tradable/Craftable/Australium"
-					else:
-						# Для killstreak предметов добавляем killstreak_tier в URL
-						killstreak_param = ""
-						if item_attrs["killstreak_tier"] > 0:
-							killstreak_param = f"&killstreak_tier={item_attrs['killstreak_tier']}"
-						
-						url = f"https://backpack.tf/stats/{quality_str}/{item_enc}/Tradable/Craftable{killstreak_param}"
+						base_url += "/Australium"
+					
+					# Для killstreak предметов добавляем killstreak_tier параметр
+					killstreak_param = ""
+					if item_attrs["killstreak_tier"] > 0:
+						killstreak_param = f"&killstreak_tier={item_attrs['killstreak_tier']}"
+					
+					url = base_url + killstreak_param
 					logger.info(f"[Arbitrage][SELL] URL → {url}")
 					await page.goto(url, timeout=90000, wait_until="domcontentloaded")
 					logger.info(f"[Arbitrage][SELL] At → {page.url}")
@@ -431,15 +436,19 @@ class UpgradeArbitrage:
 			quality_str = "Strange" if pref_attrs["quality"] == 11 else "Unique"
 			item_name = pref_attrs["base_name"]
 			
-			# Для australium предметов используем специальный путь
+			# Строим URL прогрева с учётом всех атрибутов
+			base_warmup = f"https://backpack.tf/stats/{quality_str}/{quote(item_name, safe='')}/Tradable/Craftable"
+			
+			# Для australium предметов добавляем /Australium
 			if pref_attrs["australium"]:
-				stats_warmup = f"https://backpack.tf/stats/{quality_str}/{quote(item_name, safe='')}/Tradable/Craftable/Australium"
-			else:
-				killstreak_param = ""
-				if pref_attrs["killstreak_tier"] > 0:
-					killstreak_param = f"&killstreak_tier={pref_attrs['killstreak_tier']}"
-				
-				stats_warmup = f"https://backpack.tf/stats/{quality_str}/{quote(item_name, safe='')}/Tradable/Craftable{killstreak_param}"
+				base_warmup += "/Australium"
+			
+			# Для killstreak предметов добавляем killstreak_tier параметр
+			killstreak_param = ""
+			if pref_attrs["killstreak_tier"] > 0:
+				killstreak_param = f"&killstreak_tier={pref_attrs['killstreak_tier']}"
+			
+			stats_warmup = base_warmup + killstreak_param
 
 			await page.goto(stats_warmup, timeout=90000, wait_until="domcontentloaded")
 			if "steamcommunity.com/openid/login" in page.url or "/login" in page.url:
