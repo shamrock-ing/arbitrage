@@ -3,7 +3,7 @@ import json
 import logging
 from pathlib import Path
 from playwright.async_api import async_playwright
-import aiohttp
+import requests
 from typing import Optional, Tuple
 from config import BPTF_TOKEN
 
@@ -55,7 +55,7 @@ def parse_price(text: str):
 	return None, None
 
 
-async def fetch_classifieds_api_min_sell_and_verified_buy(item_full_name: str) -> Tuple[Optional[float], Optional[float]]:
+def fetch_classifieds_api_min_sell_and_verified_buy(item_full_name: str) -> Tuple[Optional[float], Optional[float]]:
 	"""
 	Пытается получить через Backpack.tf API минимальный sell_B и проверенный buy_B в ключах.
 	Возвращает (min_sell_keys, verified_buy_keys) или (None, None) при неудаче.
@@ -71,37 +71,33 @@ async def fetch_classifieds_api_min_sell_and_verified_buy(item_full_name: str) -
 	}
 	url = "https://backpack.tf/api/classifieds/listings/v1"
 	try:
-		async with aiohttp.ClientSession() as session:
-			async with session.get(url, params=params, timeout=20) as resp:
-				if resp.status != 200:
-					return None, None
-				data = await resp.json()
-				# Ожидаем структуру вида { "sell": {"listings": [...]}, "buy": {"listings": [...] } }
-				sell_listings = ((data.get("sell") or {}).get("listings")) or []
-				buy_listings = ((data.get("buy") or {}).get("listings")) or []
+		resp = requests.get(url, params=params, timeout=20)
+		resp.raise_for_status()
+		data = resp.json()
+		sell_listings = ((data.get("sell") or {}).get("listings")) or []
+		buy_listings = ((data.get("buy") or {}).get("listings")) or []
 
-				# Берём цены только в ключах, как делает TF2Autobot по умолчанию
-				sell_keys = []
-				for lst in sell_listings:
-					curr = (lst.get("currencies") or {})
-					keys = curr.get("keys")
-					if isinstance(keys, (int, float)) and keys > 0:
-						sell_keys.append(float(keys))
-				if not sell_keys:
-					return None, None
-				min_sell_keys = min(sell_keys)
+		sell_keys = []
+		for lst in sell_listings:
+			curr = (lst.get("currencies") or {})
+			keys = curr.get("keys")
+			if isinstance(keys, (int, float)) and keys > 0:
+				sell_keys.append(float(keys))
+		if not sell_keys:
+			return None, None
+		min_sell_keys = min(sell_keys)
 
-				buy_candidates = []
-				for lst in buy_listings:
-					curr = (lst.get("currencies") or {})
-					keys = curr.get("keys")
-					if isinstance(keys, (int, float)):
-						val = float(keys)
-						if val < min_sell_keys:
-							buy_candidates.append(val)
+		buy_candidates = []
+		for lst in buy_listings:
+			curr = (lst.get("currencies") or {})
+			keys = curr.get("keys")
+			if isinstance(keys, (int, float)):
+				val = float(keys)
+				if val < min_sell_keys:
+					buy_candidates.append(val)
 
-				verified_buy = max(buy_candidates) if buy_candidates else None
-				return min_sell_keys, verified_buy
+		verified_buy = max(buy_candidates) if buy_candidates else None
+		return min_sell_keys, verified_buy
 	except Exception:
 		return None, None
 
@@ -133,7 +129,7 @@ class UpgradeArbitrage:
 					logger.info(f"[Arbitrage] Загружаю {item} (buy) через classifieds API...")
 
 					# 1) Сначала пробуем API как в TF2Autobot
-					min_sell_keys, verified_buy = await fetch_classifieds_api_min_sell_and_verified_buy(item)
+					min_sell_keys, verified_buy = fetch_classifieds_api_min_sell_and_verified_buy(item)
 					if min_sell_keys is not None and verified_buy is not None:
 						rounded_value = round(verified_buy, 2)
 						results[item] = {"value": rounded_value, "currency": "keys", "source": "ClassifiedsAPI"}
