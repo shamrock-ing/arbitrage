@@ -1,12 +1,13 @@
 {
   "sell_items": [
-    "Strange Rocket Launcher",
-    "Strange Scattergun",
+    "Strange Australium Ambassador",
+    "Strange Degreaser",
     "Strange Flame Thrower"
   ],
   "buy_items": [
-    "Strange Market Gardener",
-    "Strange Degreaser"
+    "Strange Specialized Killstreak Rocket Launcher",
+    "Strange Specialized Killstreak Degreaser",
+    "Strange Specialized Killstreak Australium Ambassador"
   ],
   "price_mode": "avg23"
 }
