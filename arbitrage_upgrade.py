@@ -52,51 +52,6 @@ def parse_price(text: str):
 	return None, None
 
 
-def fetch_classifieds_api_min_sell_and_verified_buy(item_full_name: str) -> Tuple[Optional[float], Optional[float]]:
-	"""
-	Пытается получить через Backpack.tf API минимальный sell_B и проверенный buy_B в ключах.
-	Возвращает (min_sell_keys, verified_buy_keys) или (None, None) при неудаче.
-	"""
-	if not BPTF_TOKEN:
-		return None, None
-	params = {
-		"token": BPTF_TOKEN,
-		"item_name": item_full_name,
-		"tradable": 1,
-		"craftable": 1,
-		"appid": 440,
-	}
-	url = "https://backpack.tf/api/classifieds/listings/v1"
-	try:
-		resp = requests.get(url, params=params, timeout=20)
-		resp.raise_for_status()
-		data = resp.json()
-		sell_listings = ((data.get("sell") or {}).get("listings")) or []
-		buy_listings = ((data.get("buy") or {}).get("listings")) or []
-
-		sell_keys = []
-		for lst in sell_listings:
-			curr = (lst.get("currencies") or {})
-			keys = curr.get("keys")
-			if isinstance(keys, (int, float)) and keys > 0:
-				sell_keys.append(float(keys))
-		if not sell_keys:
-			return None, None
-		min_sell_keys = min(sell_keys)
-
-		buy_candidates = []
-		for lst in buy_listings:
-			curr = (lst.get("currencies") or {})
-			keys = curr.get("keys")
-			if isinstance(keys, (int, float)):
-				val = float(keys)
-				if val < min_sell_keys:
-					buy_candidates.append(val)
-
-		verified_buy = max(buy_candidates) if buy_candidates else None
-		return min_sell_keys, verified_buy
-	except Exception:
-		return None, None
 
 
 class UpgradeArbitrage:
