@@ -321,6 +321,9 @@ class UpgradeArbitrage:
 						killstreak_param = f"&killstreak_tier={item_attrs['killstreak_tier']}"
 					
 					url = base_url + killstreak_param
+					
+					# Дополнительное логирование для отладки
+					logger.info(f"[Arbitrage][SELL] URL построен: base_url='{base_url}', killstreak_param='{killstreak_param}', final_url='{url}'")
 					logger.info(f"[Arbitrage][SELL] URL → {url}")
 					await page.goto(url, timeout=90000, wait_until="domcontentloaded")
 					logger.info(f"[Arbitrage][SELL] At → {page.url}")
@@ -480,3 +483,33 @@ class UpgradeArbitrage:
 
 			await browser.close()
 		return results
+
+
+# Тестовая функция для проверки парсинга атрибутов
+def test_parse_item_attributes():
+	"""
+	Тестирует функцию parse_item_attributes для различных названий предметов
+	"""
+	test_items = [
+		"Rocket Launcher",
+		"Strange Rocket Launcher", 
+		"Killstreak Rocket Launcher",
+		"Strange Killstreak Rocket Launcher",
+		"Specialized Killstreak Rocket Launcher",
+		"Strange Specialized Killstreak Rocket Launcher",
+		"Professional Killstreak Rocket Launcher",
+		"Strange Professional Killstreak Rocket Launcher",
+		"Australium Rocket Launcher",
+		"Strange Australium Rocket Launcher",
+		"Strange Specialized Killstreak Australium Rocket Launcher",
+		"Strange Professional Killstreak Australium Rocket Launcher"
+	]
+	
+	print("=== Тест парсинга атрибутов ===")
+	for item in test_items:
+		attrs = parse_item_attributes(item)
+		print(f"{item:50} → quality={attrs['quality']}, killstreak_tier={attrs['killstreak_tier']}, australium={attrs['australium']}, base_name='{attrs['base_name']}'")
+
+
+if __name__ == "__main__":
+	test_parse_item_attributes()
