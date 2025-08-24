@@ -3,6 +3,7 @@ import json
 import logging
 from pathlib import Path
 from playwright.async_api import async_playwright
+from urllib.parse import quote
 
 logger = logging.getLogger("tf2-arbitrage")
 
@@ -82,7 +83,7 @@ class UpgradeArbitrage:
 					is_strange = item.lower().startswith("strange ")
 					quality = 11 if is_strange else 6
 					item_name = item.replace("Strange ", "").strip()
-					item_enc = item_name.replace(" ", "%20")
+					item_enc = quote(item_name, safe="")
 					url_class = (
 						f"https://backpack.tf/classifieds?item={item_enc}"
 						f"&quality={quality}&tradable=1&craftable=1&australium=-1&killstreak_tier=0"
@@ -131,8 +132,9 @@ class UpgradeArbitrage:
 
 					quality = "Strange" if item.lower().startswith("strange ") else "Unique"
 					item_name = item.replace("Strange ", "").strip()
+					item_enc = quote(item_name, safe="")
 
-					url = f"https://backpack.tf/stats/{quality}/{item_name.replace(' ', '%20')}/Tradable/Craftable"
+					url = f"https://backpack.tf/stats/{quality}/{item_enc}/Tradable/Craftable"
 					await page.goto(url, timeout=60000, wait_until="networkidle")
 
 					selector = 'div.item[data-listing_intent="sell"]'
