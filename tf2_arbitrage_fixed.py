@@ -231,220 +231,220 @@ class UpgradeArbitrage:
 							f"&quality={item_attrs['quality']}&tradable=1&craftable=1&australium={australium_param}&killstreak_tier={item_attrs['killstreak_tier']}"
 						)
 
-					# Определяем цену ключа в ref (если не задана в конфиге) один раз за сессию
-					effective_key_ref = KEY_PRICE_REF or self.runtime_key_price_ref
-					if not effective_key_ref:
-						self.runtime_key_price_ref = await self._detect_key_price_ref(page)
-						effective_key_ref = self.runtime_key_price_ref
+						# Определяем цену ключа в ref (если не задана в конфиге) один раз за сессию
+						effective_key_ref = KEY_PRICE_REF or self.runtime_key_price_ref
+						if not effective_key_ref:
+							self.runtime_key_price_ref = await self._detect_key_price_ref(page)
+							effective_key_ref = self.runtime_key_price_ref
 
-					# PASS 1: глобальный min SELL (в ключах; конвертируем ref при необходимости)
-					global_min_sell = None
-					prev_sell_count = 0
-					max_pages = 5
-					for page_num in range(1, max_pages + 1):
-						url = base_url if page_num == 1 else f"{base_url}&page={page_num}"
-						logger.info(f"[Arbitrage][BUY/P1] URL → {url}")
-						await page.goto(url, timeout=90000, wait_until="domcontentloaded")
-						await asyncio.sleep(self.delays["page_load"])
-						await page.locator('[data-listing_intent="sell"], [data-listing_intent="buy"]').first.wait_for(state="attached", timeout=90000)
-						await _load_all_classifieds_orders(page)
+						# PASS 1: глобальный min SELL (в ключах; конвертируем ref при необходимости)
+						global_min_sell = None
+						prev_sell_count = 0
+						max_pages = 5
+						for page_num in range(1, max_pages + 1):
+							url = base_url if page_num == 1 else f"{base_url}&page={page_num}"
+							logger.info(f"[Arbitrage][BUY/P1] URL → {url}")
+							await page.goto(url, timeout=90000, wait_until="domcontentloaded")
+							await asyncio.sleep(self.delays["page_load"])
+							await page.locator('[data-listing_intent="sell"], [data-listing_intent="buy"]').first.wait_for(state="attached", timeout=90000)
+							await _load_all_classifieds_orders(page)
 
-						page_sell_prices = await page.locator('[data-listing_intent="sell"]').evaluate_all(
-							"elements => elements.map(e => e.getAttribute('data-listing_price'))"
-						)
+							page_sell_prices = await page.locator('[data-listing_intent="sell"]').evaluate_all(
+								"elements => elements.map(e => e.getAttribute('data-listing_price'))"
+							)
 
-						page_min = None
-						for pt in page_sell_prices:
-							val, curr = parse_price(pt)
-							if val is None:
-								continue
-							keys_val, ok = _to_keys_if_possible(val, curr, effective_key_ref)
-							if not ok:
-								continue
-							if page_min is None or keys_val < page_min:
-								page_min = keys_val
-						if page_min is not None:
-							if global_min_sell is None or page_min < global_min_sell:
-								global_min_sell = page_min
+							page_min = None
+							for pt in page_sell_prices:
+								val, curr = parse_price(pt)
+								if val is None:
+									continue
+								keys_val, ok = _to_keys_if_possible(val, curr, effective_key_ref)
+								if not ok:
+									continue
+								if page_min is None or keys_val < page_min:
+									page_min = keys_val
+							if page_min is not None:
+								if global_min_sell is None or page_min < global_min_sell:
+									global_min_sell = page_min
 
-						logger.info(f"[Arbitrage][BUY/P1] page={page_num}, page_min={page_min}, global_min={global_min_sell}")
+							logger.info(f"[Arbitrage][BUY/P1] page={page_num}, page_min={page_min}, global_min={global_min_sell}")
 
-						if len(page_sell_prices) <= prev_sell_count:
-							break
-						prev_sell_count = len(page_sell_prices)
+							if len(page_sell_prices) <= prev_sell_count:
+								break
+							prev_sell_count = len(page_sell_prices)
 
-						await asyncio.sleep(self.delays["between_requests"])
+							await asyncio.sleep(self.delays["between_requests"])
 
-					if global_min_sell is None:
-						logger.warning(f"[Arbitrage] Нет пригодных SELL объявлений для {item} (keys/конверсия)")
-						results[item] = {"value": 0.0, "currency": "unknown", "source": "None"}
-						continue
-
-					# PASS 2: ранний стоп — ищем buy < global_min_sell (в ключах; конвертируем ref при необходимости)
-					best_buy = None
-					for page_num in range(1, max_pages + 1):
-						url = base_url if page_num == 1 else f"{base_url}&page={page_num}"
-						logger.info(f"[Arbitrage][BUY/P2] URL → {url}")
-						await page.goto(url, timeout=90000, wait_until="domcontentloaded")
-						await asyncio.sleep(0.5)
-						# На некоторых страницах могут отсутствовать buy, поэтому проверяем наличие
-						has_buy = await page.locator('[data-listing_intent="buy"]').count()
-						if has_buy == 0:
-							logger.info(f"[Arbitrage][BUY/P2] page={page_num} buy=0")
-							await asyncio.sleep(0.4)
+						if global_min_sell is None:
+							logger.warning(f"[Arbitrage] Нет пригодных SELL объявлений для {item} (keys/конверсия)")
+							results[item] = {"value": 0.0, "currency": "unknown", "source": "None"}
 							continue
 
-						await page.locator('[data-listing_intent="buy"]').first.wait_for(state="attached", timeout=90000)
-						await _load_all_classifieds_orders(page)
-
-						page_buy_prices = await page.locator('[data-listing_intent="buy"]').evaluate_all(
-							"elements => elements.map(e => e.getAttribute('data-listing_price'))"
-						)
-
-						candidates = []
-						for pt in page_buy_prices:
-							val, curr = parse_price(pt)
-							if val is None:
+						# PASS 2: ранний стоп — ищем buy < global_min_sell (в ключах; конвертируем ref при необходимости)
+						best_buy = None
+						for page_num in range(1, max_pages + 1):
+							url = base_url if page_num == 1 else f"{base_url}&page={page_num}"
+							logger.info(f"[Arbitrage][BUY/P2] URL → {url}")
+							await page.goto(url, timeout=90000, wait_until="domcontentloaded")
+							await asyncio.sleep(self.delays["page_load"])
+							# На некоторых страницах могут отсутствовать buy, поэтому проверяем наличие
+							has_buy = await page.locator('[data-listing_intent="buy"]').count()
+							if has_buy == 0:
+								logger.info(f"[Arbitrage][BUY/P2] page={page_num} buy=0")
+								await asyncio.sleep(0.4)
 								continue
-							keys_val, ok = _to_keys_if_possible(val, curr, effective_key_ref)
-							if ok and keys_val < global_min_sell:
-								candidates.append(keys_val)
 
-						if candidates:
-							best_buy = max(candidates)
-							logger.info(f"[Arbitrage][BUY/P2] Early stop on page {page_num}: buy={best_buy:.2f} keys < global min sell={global_min_sell:.2f}")
-							break
+							await page.locator('[data-listing_intent="buy"]').first.wait_for(state="attached", timeout=90000)
+							await _load_all_classifieds_orders(page)
 
-						await asyncio.sleep(self.delays["between_requests"])
+							page_buy_prices = await page.locator('[data-listing_intent="buy"]').evaluate_all(
+								"elements => elements.map(e => e.getAttribute('data-listing_price'))"
+							)
 
-					if best_buy is not None:
-						results[item] = {"value": round(best_buy, 2), "currency": "keys", "source": "ClassifiedsVerified"}
+							candidates = []
+							for pt in page_buy_prices:
+								val, curr = parse_price(pt)
+								if val is None:
+									continue
+								keys_val, ok = _to_keys_if_possible(val, curr, effective_key_ref)
+								if ok and keys_val < global_min_sell:
+									candidates.append(keys_val)
+
+							if candidates:
+								best_buy = max(candidates)
+								logger.info(f"[Arbitrage][BUY/P2] Early stop on page {page_num}: buy={best_buy:.2f} keys < global min sell={global_min_sell:.2f}")
+								break
+
+							await asyncio.sleep(self.delays["between_requests"])
+
+						if best_buy is not None:
+							results[item] = {"value": round(best_buy, 2), "currency": "keys", "source": "ClassifiedsVerified"}
+						else:
+							logger.warning(f"[Arbitrage] Не нашёл buy ниже глобального min sell для {item}")
+							results[item] = {"value": 0.0, "currency": "unknown", "source": "None"}
+
 					else:
-						logger.warning(f"[Arbitrage] Не нашёл buy ниже глобального min sell для {item}")
-						results[item] = {"value": 0.0, "currency": "unknown", "source": "None"}
+						logger.info(f"[Arbitrage] Загружаю {item} (sell)...")
 
-				else:
-					logger.info(f"[Arbitrage] Загружаю {item} (sell)...")
-
-					# Парсим атрибуты предмета (с кэшированием)
-					item_attrs = self._get_cached_attributes(item)
-					logger.info(f"[Arbitrage][SELL] Атрибуты {item}: quality={item_attrs['quality']}, killstreak_tier={item_attrs['killstreak_tier']}, australium={item_attrs['australium']}, base_name='{item_attrs['base_name']}'")
-					
-					# Определяем, нужно ли использовать classifieds вместо stats
-					use_classifieds = item_attrs["killstreak_tier"] > 0 or item_attrs["australium"]
-					
-					if use_classifieds:
-						logger.info(f"[Arbitrage] Используем classifieds для {item} (сложные атрибуты)")
+						# Парсим атрибуты предмета (с кэшированием)
+						item_attrs = self._get_cached_attributes(item)
+						logger.info(f"[Arbitrage][SELL] Атрибуты {item}: quality={item_attrs['quality']}, killstreak_tier={item_attrs['killstreak_tier']}, australium={item_attrs['australium']}, base_name='{item_attrs['base_name']}'")
 						
-						# Используем classifieds для sell (как для buy)
-						item_enc = quote(item_attrs["base_name"], safe="")
-						australium_param = "1" if item_attrs["australium"] else "-1"
+						# Определяем, нужно ли использовать classifieds вместо stats
+						use_classifieds = item_attrs["killstreak_tier"] > 0 or item_attrs["australium"]
 						
-						base_url = (
-							f"https://backpack.tf/classifieds?item={item_enc}"
-							f"&quality={item_attrs['quality']}&tradable=1&craftable=1&australium={australium_param}&killstreak_tier={item_attrs['killstreak_tier']}"
-						)
-						
-						# Получаем sell цены через classifieds
-						url = base_url
-						logger.info(f"[Arbitrage][SELL] Classifieds URL → {url}")
-						await page.goto(url, timeout=90000, wait_until="domcontentloaded")
-						await asyncio.sleep(self.delays["page_load"])
-						await page.locator('[data-listing_intent="sell"]').first.wait_for(state="attached", timeout=90000)
-						await _load_all_classifieds_orders(page)
-						
-						sell_prices = await page.locator('[data-listing_intent="sell"]').evaluate_all(
-							"elements => elements.map(e => e.getAttribute('data-listing_price'))"
-						)
-						
-						logger.info(f"[DEBUG] Нашёл {len(sell_prices)} sell объявлений в classifieds для {item}: {sell_prices}")
-						
-						if self.price_mode == "first":
-							price_texts = sell_prices[:1]
-						elif self.price_mode == "avg23" and len(sell_prices) >= 3:
-							price_texts = sell_prices[1:3]
+						if use_classifieds:
+							logger.info(f"[Arbitrage] Используем classifieds для {item} (сложные атрибуты)")
+							
+							# Используем classifieds для sell (как для buy)
+							item_enc = quote(item_attrs["base_name"], safe="")
+							australium_param = "1" if item_attrs["australium"] else "-1"
+							
+							base_url = (
+								f"https://backpack.tf/classifieds?item={item_enc}"
+								f"&quality={item_attrs['quality']}&tradable=1&craftable=1&australium={australium_param}&killstreak_tier={item_attrs['killstreak_tier']}"
+							)
+							
+							# Получаем sell цены через classifieds
+							url = base_url
+							logger.info(f"[Arbitrage][SELL] Classifieds URL → {url}")
+							await page.goto(url, timeout=90000, wait_until="domcontentloaded")
+							await asyncio.sleep(self.delays["page_load"])
+							await page.locator('[data-listing_intent="sell"]').first.wait_for(state="attached", timeout=90000)
+							await _load_all_classifieds_orders(page)
+							
+							sell_prices = await page.locator('[data-listing_intent="sell"]').evaluate_all(
+								"elements => elements.map(e => e.getAttribute('data-listing_price'))"
+							)
+							
+							logger.info(f"[DEBUG] Нашёл {len(sell_prices)} sell объявлений в classifieds для {item}: {sell_prices}")
+							
+							if self.price_mode == "first":
+								price_texts = sell_prices[:1]
+							elif self.price_mode == "avg23" and len(sell_prices) >= 3:
+								price_texts = sell_prices[1:3]
+							else:
+								price_texts = sell_prices[:1]
+							
+							values = []
+							currency = None
+							for pt in price_texts:
+								val, curr = parse_price(pt)
+								if val is not None:
+									values.append(val)
+									if not currency:
+										currency = curr
+							
+							if values:
+								avg_value = sum(values) / len(values)
+								rounded_value = round(avg_value, 2)
+								self.cached_sell[item] = rounded_value
+								price_text = f"{rounded_value:.2f} {currency}"
+								source = "ClassifiedsSell"
+								logger.info(f"[Arbitrage] Цена {item} (sell): {price_text} ({source})")
+								results[item] = {
+									"value": rounded_value,
+									"currency": currency,
+									"source": source
+								}
+							else:
+								raise Exception("Не удалось разобрать цены из classifieds")
+							
 						else:
-							price_texts = sell_prices[:1]
-						
-						values = []
-						currency = None
-						for pt in price_texts:
-							val, curr = parse_price(pt)
-							if val is not None:
-								values.append(val)
-								if not currency:
-									currency = curr
-						
-						if values:
-							avg_value = sum(values) / len(values)
-							rounded_value = round(avg_value, 2)
-							self.cached_sell[item] = rounded_value
-							price_text = f"{rounded_value:.2f} {currency}"
-							source = "ClassifiedsSell"
-							logger.info(f"[Arbitrage] Цена {item} (sell): {price_text} ({source})")
-							results[item] = {
-								"value": rounded_value,
-								"currency": currency,
-								"source": source
-							}
-						else:
-							raise Exception("Не удалось разобрать цены из classifieds")
-						
-					else:
-						logger.info(f"[Arbitrage] Используем stats для {item} (простые атрибуты)")
-						
-						# Используем stats для простых предметов
-						if item_attrs["quality"] == 11:
-							quality_str = "Strange"
-						else:
-							quality_str = "Unique"
-						
-						item_enc = quote(item_attrs["base_name"], safe="")
-						url = f"https://backpack.tf/stats/{quality_str}/{item_enc}/Tradable/Craftable"
-						
-						logger.info(f"[Arbitrage][SELL] Stats URL → {url}")
-						await page.goto(url, timeout=90000, wait_until="domcontentloaded")
-						logger.info(f"[Arbitrage][SELL] At → {page.url}")
+							logger.info(f"[Arbitrage] Используем stats для {item} (простые атрибуты)")
+							
+							# Используем stats для простых предметов
+							if item_attrs["quality"] == 11:
+								quality_str = "Strange"
+							else:
+								quality_str = "Unique"
+							
+							item_enc = quote(item_attrs["base_name"], safe="")
+							url = f"https://backpack.tf/stats/{quality_str}/{item_enc}/Tradable/Craftable"
+							
+							logger.info(f"[Arbitrage][SELL] Stats URL → {url}")
+							await page.goto(url, timeout=90000, wait_until="domcontentloaded")
+							logger.info(f"[Arbitrage][SELL] At → {page.url}")
 
-						selector = 'div.item[data-listing_intent="sell"]'
-						await page.locator(selector).first.wait_for(state="attached", timeout=90000)
+							selector = 'div.item[data-listing_intent="sell"]'
+							await page.locator(selector).first.wait_for(state="attached", timeout=90000)
 
-						prices = await page.locator(selector).evaluate_all(
-							"elements => elements.map(e => e.getAttribute('data-listing_price'))"
-						)
+							prices = await page.locator(selector).evaluate_all(
+								"elements => elements.map(e => e.getAttribute('data-listing_price'))"
+							)
 
-						logger.info(f"[DEBUG] Нашёл {len(prices)} объявлений для {item} (sell): {prices}")
+							logger.info(f"[DEBUG] Нашёл {len(prices)} объявлений для {item} (sell): {prices}")
 
-						if self.price_mode == "first":
-							price_texts = prices[:1]
-						elif self.price_mode == "avg23" and len(prices) >= 3:
-							price_texts = prices[1:3]
-						else:
-							price_texts = prices[:1]
+							if self.price_mode == "first":
+								price_texts = prices[:1]
+							elif self.price_mode == "avg23" and len(prices) >= 3:
+								price_texts = prices[1:3]
+							else:
+								price_texts = prices[:1]
 
-						values = []
-						currency = None
-						for pt in price_texts:
-							val, curr = parse_price(pt)
-							if val is not None:
-								values.append(val)
-								if not currency:
-									currency = curr
+							values = []
+							currency = None
+							for pt in price_texts:
+								val, curr = parse_price(pt)
+								if val is not None:
+									values.append(val)
+									if not currency:
+										currency = curr
 
-						if values:
-							avg_value = sum(values) / len(values)
-							rounded_value = round(avg_value, 2)
-							self.cached_sell[item] = rounded_value
-							price_text = f"{rounded_value:.2f} {currency}"
-							source = "SELLOrders"
-							logger.info(f"[Arbitrage] Цена {item} (sell): {price_text} ({source})")
-							results[item] = {
-								"value": rounded_value,
-								"currency": currency,
-								"source": source
-							}
-						else:
-							raise Exception("Не удалось разобрать цены")
+							if values:
+								avg_value = sum(values) / len(values)
+								rounded_value = round(avg_value, 2)
+								self.cached_sell[item] = rounded_value
+								price_text = f"{rounded_value:.2f} {currency}"
+								source = "SELLOrders"
+								logger.info(f"[Arbitrage] Цена {item} (sell): {price_text} ({source})")
+								results[item] = {
+									"value": rounded_value,
+									"currency": currency,
+									"source": source
+								}
+							else:
+								raise Exception("Не удалось разобрать цены")
 
 					# Если успешно обработали, выходим из retry цикла
 					break
