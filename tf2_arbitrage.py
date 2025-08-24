@@ -183,15 +183,19 @@ class UpgradeArbitrage:
 
 	async def analyze_upgrade_profitability(self, page, base_item: str, kit_type: str = "specialized"):
 		"""
-		Анализирует рентабельность апгрейда предмета:
-		- base_item: базовый предмет (например, "Rocket Launcher")
-		- kit_type: тип кита ("specialized" или "professional")
+		Анализирует рентабельность апгрейда базового предмета с killstreak kit
 		
-		Возвращает анализ с расчётом прибыли/убытка
+		Args:
+			page: Playwright page
+			base_item: базовый предмет (например, "Rocket Launcher")
+			kit_type: тип кита ("specialized" или "professional")
+		
+		Returns:
+			dict с результатами анализа
 		"""
 		logger.info(f"[Upgrade Analysis] Анализирую рентабельность апгрейда {base_item} с {kit_type} killstreak kit")
 		
-		# Определяем параметры кита
+		# Определяем информацию о ките
 		kit_info = {
 			"specialized": {
 				"name": "Specialized Killstreak Kit",
@@ -213,106 +217,81 @@ class UpgradeArbitrage:
 		
 		kit = kit_info[kit_type]
 		
-		# Получаем цену базового предмета (sell)
-		logger.info(f"[Upgrade Analysis] Получаю цену базового предмета: {base_item}")
-		base_prices = await self.fetch_prices(page, [base_item], "sell")
-		if not base_prices or base_item not in base_prices:
-			logger.error(f"[Upgrade Analysis] Не удалось получить цену базового предмета {base_item}")
-			return None
-		
-		base_price_data = base_prices[base_item]
-		base_price_value = base_price_data["value"]
-		base_price_currency = base_price_data["currency"]
-		
-		# Конвертируем базовую цену в ref для расчётов
-		base_price_ref = 0
-		if base_price_currency == "ref":
-			base_price_ref = base_price_value
-		elif base_price_currency == "keys":
-			# Получаем актуальную цену ключа
-			if not self.runtime_key_price_ref:
-				self.runtime_key_price_ref = await self._detect_key_price_ref(page)
-			key_price = self.runtime_key_price_ref or KEY_PRICE_REF or 50.0
-			base_price_ref = base_price_value * key_price
-		
-		logger.info(f"[Upgrade Analysis] Базовая цена {base_item}: {base_price_value} {base_price_currency} = {base_price_ref:.2f} ref")
-		
-		# Получаем цену апгрейднутого предмета (buy)
-		upgraded_item_name = f"Strange {kit['name']} {base_item}"
-		logger.info(f"[Upgrade Analysis] Получаю цену апгрейднутого предмета: {upgraded_item_name}")
-		
-		upgraded_prices = await self.fetch_prices(page, [upgraded_item_name], "buy")
-		if not upgraded_prices or upgraded_item_name not in upgraded_prices:
-			logger.error(f"[Upgrade Analysis] Не удалось получить цену апгрейднутого предмета {upgraded_item_name}")
-			return None
-		
-		upgraded_price_data = upgraded_prices[upgraded_item_name]
-		upgraded_price_value = upgraded_price_data["value"]
-		upgraded_price_currency = upgraded_price_data["currency"]
-		
-		# Конвертируем цену апгрейда в ref
-		upgraded_price_ref = 0
-		if upgraded_price_currency == "ref":
-			upgraded_price_ref = upgraded_price_value
-		elif upgraded_price_currency == "keys":
-			key_price = self.runtime_key_price_ref or KEY_PRICE_REF or 50.0
-			upgraded_price_ref = upgraded_price_value * key_price
-		
-		logger.info(f"[Upgrade Analysis] Цена апгрейда {upgraded_item_name}: {upgraded_price_value} {upgraded_price_currency} = {upgraded_price_ref:.2f} ref")
-		
-		# Расчёт стоимости апгрейда
-		kit_cost_ref = kit["avg_price_ref"]
-		total_upgrade_cost = base_price_ref + kit_cost_ref
-		
-		# Расчёт прибыли/убытка
-		profit_ref = upgraded_price_ref - total_upgrade_cost
-		profit_percent = (profit_ref / total_upgrade_cost) * 100 if total_upgrade_cost > 0 else 0
-		
-		# Формируем результат
-		result = {
-			"base_item": base_item,
-			"kit_type": kit_type,
-			"kit_name": kit["name"],
-			"base_price": {
-				"value": base_price_value,
-				"currency": base_price_currency,
-				"ref": base_price_ref
-			},
-			"kit_cost": {
-				"ref": kit_cost_ref,
-				"range": kit["price_range"]
-			},
-			"upgraded_item": upgraded_item_name,
-			"upgraded_price": {
-				"value": upgraded_price_value,
-				"currency": upgraded_price_currency,
-				"ref": upgraded_price_ref
-			},
-			"total_cost": total_upgrade_cost,
-			"profit": {
-				"ref": profit_ref,
-				"percent": profit_percent,
-				"is_profitable": profit_ref > 0
-			},
-			"analysis": {
-				"recommendation": "ПРИБЫЛЬНО" if profit_ref > 0 else "УБЫТОЧНО",
-				"roi": f"{profit_percent:.1f}%",
-				"break_even": f"{(kit_cost_ref / (upgraded_price_ref - base_price_ref) * 100):.1f}%" if upgraded_price_ref > base_price_ref else "Невозможно"
+		try:
+			# 1. Получаем цену базового предмета
+			logger.info(f"[Upgrade Analysis] Получаю цену базового предмета: {base_item}")
+			base_price_data = await self.fetch_prices(page, [base_item], "sell")
+			base_price = base_price_data.get(base_item, {})
+			
+			if not base_price or base_price.get("value", 0) == 0:
+				logger.warning(f"[Upgrade Analysis] Не удалось получить цену для базового предмета {base_item}")
+				return None
+			
+			base_price_ref = base_price.get("ref", 0)
+			logger.info(f"[Upgrade Analysis] Базовая цена {base_item}: {base_price.get('value')} {base_price.get('currency')} = {base_price_ref} ref")
+			
+			# 2. Получаем цену апгрейднутого предмета
+			# Формируем название апгрейднутого предмета
+			upgraded_item_name = f"Strange {kit['name']} {base_item}"
+			logger.info(f"[Upgrade Analysis] Получаю цену апгрейднутого предмета: {upgraded_item_name}")
+			
+			upgraded_price_data = await self.fetch_prices(page, [upgraded_item_name], "buy")
+			upgraded_price = upgraded_price_data.get(upgraded_item_name, {})
+			
+			if not upgraded_price or upgraded_price.get("value", 0) == 0:
+				logger.warning(f"[Upgrade Analysis] Не удалось получить цену для апгрейднутого предмета {upgraded_item_name}")
+				return None
+			
+			upgraded_price_ref = upgraded_price.get("ref", 0)
+			logger.info(f"[Upgrade Analysis] Цена апгрейда {upgraded_item_name}: {upgraded_price.get('value')} {upgraded_price.get('currency')} = {upgraded_price_ref} ref")
+			
+			# 3. Рассчитываем общую стоимость апгрейда
+			kit_cost_ref = kit["avg_price_ref"]
+			total_cost = base_price_ref + kit_cost_ref
+			
+			# 4. Рассчитываем прибыль/убыток
+			profit_ref = upgraded_price_ref - total_cost
+			profit_percent = (profit_ref / total_cost * 100) if total_cost > 0 else 0
+			is_profitable = profit_ref > 0
+			
+			# 5. Формируем результат
+			result = {
+				"base_item": base_item,
+				"kit_type": kit_type,
+				"kit_name": kit["name"],
+				"base_price": base_price,
+				"kit_cost": {"ref": kit_cost_ref, "range": kit["price_range"]},
+				"upgraded_item": upgraded_item_name,
+				"upgraded_price": upgraded_price,
+				"total_cost": total_cost,
+				"profit": {
+					"ref": profit_ref,
+					"percent": profit_percent,
+					"is_profitable": is_profitable
+				},
+				"analysis": {
+					"recommendation": "ПРИБЫЛЬНО" if is_profitable else "УБЫТОЧНО",
+					"roi": f"{profit_percent:.1f}%",
+					"break_even": f"{(base_price_ref / total_cost * 100):.1f}%" if total_cost > 0 else "0%"
+				}
 			}
-		}
-		
-		# Логируем результат
-		logger.info(f"[Upgrade Analysis] === РЕЗУЛЬТАТ АНАЛИЗА АПГРЕЙДА ===")
-		logger.info(f"[Upgrade Analysis] Предмет: {base_item}")
-		logger.info(f"[Upgrade Analysis] Кит: {kit['name']} ({kit['price_range']})")
-		logger.info(f"[Upgrade Analysis] Базовая цена: {base_price_value} {base_price_currency} ({base_price_ref:.2f} ref)")
-		logger.info(f"[Upgrade Analysis] Стоимость кита: {kit_cost_ref:.2f} ref")
-		logger.info(f"[Upgrade Analysis] Общая стоимость: {total_upgrade_cost:.2f} ref")
-		logger.info(f"[Upgrade Analysis] Цена апгрейда: {upgraded_price_value} {upgraded_price_currency} ({upgraded_price_ref:.2f} ref)")
-		logger.info(f"[Upgrade Analysis] Прибыль/убыток: {profit_ref:.2f} ref ({profit_percent:.1f}%)")
-		logger.info(f"[Upgrade Analysis] Рекомендация: {result['analysis']['recommendation']}")
-		
-		return result
+			
+			# 6. Логируем результат
+			logger.info(f"[Upgrade Analysis] === РЕЗУЛЬТАТ АНАЛИЗА АПГРЕЙДА ===")
+			logger.info(f"[Upgrade Analysis] Предмет: {base_item}")
+			logger.info(f"[Upgrade Analysis] Кит: {kit['name']} ({kit['price_range']})")
+			logger.info(f"[Upgrade Analysis] Базовая цена: {base_price.get('value')} {base_price.get('currency')} ({base_price_ref} ref)")
+			logger.info(f"[Upgrade Analysis] Стоимость кита: {kit_cost_ref} ref")
+			logger.info(f"[Upgrade Analysis] Общая стоимость: {total_cost} ref")
+			logger.info(f"[Upgrade Analysis] Цена апгрейда: {upgraded_price.get('value')} {upgraded_price.get('currency')} ({upgraded_price_ref} ref)")
+			logger.info(f"[Upgrade Analysis] Прибыль/убыток: {profit_ref:+.2f} ref ({profit_percent:+.1f}%)")
+			logger.info(f"[Upgrade Analysis] Рекомендация: {result['analysis']['recommendation']}")
+			
+			return result
+			
+		except Exception as e:
+			logger.error(f"[Upgrade Analysis] Ошибка при анализе апгрейда {base_item} + {kit_type}: {e}")
+			return None
 
 	async def analyze_multiple_upgrades(self, page, base_items: list, kit_types: list = None):
 		"""

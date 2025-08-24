@@ -6,10 +6,10 @@
 
 ## Как это работает
 
-1. **Анализ базового предмета**: Бот получает текущую цену базового предмета (например, "Rocket Launcher")
-2. **Расчёт стоимости апгрейда**: Добавляет стоимость killstreak kit к цене базового предмета
-3. **Анализ апгрейднутого предмета**: Получает цену уже апгрейднутого предмета (например, "Strange Specialized Killstreak Rocket Launcher")
-4. **Расчёт прибыли**: Сравнивает общую стоимость с ценой продажи апгрейда
+1. **Анализ базового предмета**: Бот получает текущую цену базового предмета (например, "Rocket Launcher") через sell orders
+2. **Расчёт стоимости апгрейда**: Добавляет фиксированную стоимость killstreak kit к цене базового предмета
+3. **Анализ апгрейднутого предмета**: Получает цену уже готового апгрейднутого предмета (например, "Strange Specialized Killstreak Rocket Launcher") через buy orders
+4. **Расчёт прибыли**: Сравнивает общую стоимость (базовая цена + стоимость кита) с ценой продажи апгрейда
 
 ## Поддерживаемые типы китов
 
@@ -75,16 +75,16 @@ results = await arbitrage.run_upgrade_analysis(custom_items, ["professional"])
 [Upgrade Analysis] === РЕЗУЛЬТАТ АНАЛИЗА АПГРЕЙДА ===
 [Upgrade Analysis] Предмет: Rocket Launcher
 [Upgrade Analysis] Кит: Specialized Killstreak Kit (47-50 ref)
-[Upgrade Analysis] Базовая цена: 9.77 ref (9.77 ref)
+[Upgrade Analysis] Базовая цена: 1.77 ref (1.77 ref)
 [Upgrade Analysis] Стоимость кита: 48.50 ref
-[Upgrade Analysis] Общая стоимость: 58.27 ref
+[Upgrade Analysis] Общая стоимость: 50.27 ref
 [Upgrade Analysis] Цена апгрейда: 3.25 keys (169.00 ref)
-[Upgrade Analysis] Прибыль/убыток: 110.73 ref (190.0%)
+[Upgrade Analysis] Прибыль/убыток: +118.73 ref (+236.0%)
 [Upgrade Analysis] Рекомендация: ПРИБЫЛЬНО
 
 [Upgrade Analysis] ================================================
 [Upgrade Analysis] ТОП ПРИБЫЛЬНЫХ АПГРЕЙДОВ:
-[Upgrade Analysis] 1. Rocket Launcher + specialized: +110.73 ref (+190.0%)
+[Upgrade Analysis] 1. Rocket Launcher + specialized: +118.73 ref (+236.0%)
 [Upgrade Analysis] 2. Degreaser + specialized: +89.23 ref (+156.2%)
 ```
 
@@ -97,16 +97,16 @@ results = await arbitrage.run_upgrade_analysis(custom_items, ["professional"])
     "base_item": "Rocket Launcher",
     "kit_type": "specialized", 
     "kit_name": "Specialized Killstreak Kit",
-    "base_price": {"value": 9.77, "currency": "ref", "ref": 9.77},
+    "base_price": {"value": 1.77, "currency": "ref", "ref": 1.77},
     "kit_cost": {"ref": 48.5, "range": "47-50 ref"},
     "upgraded_item": "Strange Specialized Killstreak Rocket Launcher",
     "upgraded_price": {"value": 3.25, "currency": "keys", "ref": 169.0},
-    "total_cost": 58.27,
-    "profit": {"ref": 110.73, "percent": 190.0, "is_profitable": True},
+    "total_cost": 50.27,
+    "profit": {"ref": 118.73, "percent": 236.0, "is_profitable": True},
     "analysis": {
         "recommendation": "ПРИБЫЛЬНО",
-        "roi": "190.0%",
-        "break_even": "44.0%"
+        "roi": "236.0%",
+        "break_even": "3.5%"
     }
 }
 ```
@@ -118,6 +118,7 @@ results = await arbitrage.run_upgrade_analysis(custom_items, ["professional"])
 - **Подробный анализ**: Показывает ROI, break-even точку
 - **Массовый анализ**: Может анализировать множество предметов одновременно
 - **Гибкость**: Поддерживает разные типы китов и предметов
+- **Правильная логика**: Сравнивает базовый предмет + стоимость кита с готовым апгрейдом
 
 ## Ограничения
 
@@ -125,3 +126,4 @@ results = await arbitrage.run_upgrade_analysis(custom_items, ["professional"])
 - Зависит от доступности backpack.tf
 - Цены могут меняться в реальном времени
 - Некоторые редкие предметы могут не иметь достаточного количества объявлений
+- Анализ основан на текущих рыночных ценах и может не учитывать долгосрочные тренды
