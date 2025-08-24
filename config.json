@@ -1,0 +1,12 @@
+{
+  "sell_items": [
+    "Strange Rocket Launcher",
+    "Strange Scattergun",
+    "Strange Flame Thrower"
+  ],
+  "buy_items": [
+    "Strange Market Gardener",
+    "Strange Degreaser"
+  ],
+  "price_mode": "avg23"
+}

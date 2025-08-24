@@ -1,0 +1,58 @@
+[
+  {
+    "name": "cf_clearance",
+    "value": "G9.7zmiCIICBVUEr5Jv_k9i8_jtwitWMPyz0BXGe8ec-1755968874-1.2.1.1-x.OWiARPM7NrXR0x6IVZ39pGMBnNxhQ.T42b6KGEBxQeC6zfRB_bCjTv4SRRPRyrSLYDy44eTwbnHaREI1M.oqrG1IcXy5zhJVB6.uq2ry_wtj024C3eYnriPRhY.Z6ULvwlnUicN8DSox.e5KjxhunPjzBpF.3c1li9YqRG.qtKDcG1mevjxqyOnQ10PlyKSBzRYM0fxZHuKyF2OoXJV88DkHS9088GLKte1BIsoZY",
+    "domain": ".backpack.tf",
+    "path": "/",
+    "secure": true,
+    "expires": 1787504874
+  },
+  {
+    "name": "user-id",
+    "value": "7jzoe3p3zchqqfafbg4r",
+    "domain": ".backpack.tf",
+    "path": "/",
+    "secure": false,
+    "expires": 1763744877
+  },
+  {
+    "name": "timezoneOffset",
+    "value": "18000,0",
+    "domain": "steamcommunity.com",
+    "path": "/",
+    "secure": false,
+    "expires": 1787504879
+  },
+  {
+    "name": "steamLoginSecure",
+    "value": "76561198189472678%7C%7CeyAidHlwIjogIkpXVCIsICJhbGciOiAiRWREU0EiIH0.eyAiaXNzIjogInI6MDAwOF8yNkQyODg5NV81OEMyMSIsICJzdWIiOiAiNzY1NjExOTgxODk0NzI2NzgiLCAiYXVkIjogWyAid2ViOmNvbW11bml0eSIgXSwgImV4cCI6IDE3NTYwNTU1NzMsICJuYmYiOiAxNzQ3MzI4OTIyLCAiaWF0IjogMTc1NTk2ODkyMiwgImp0aSI6ICIwMDAxXzI2Q0U5RDczXzlFMjI4IiwgIm9hdCI6IDE3NTU5Njg5MjIsICJydF9leHAiOiAxNzc0MDYyMzU4LCAicGVyIjogMCwgImlwX3N1YmplY3QiOiAiMTczLjI0NC4xNTguNjIiLCAiaXBfY29uZmlybWVyIjogIjE3My4yNDQuMTU4LjYyIiB9.CZm0UapAcm5m0JwAkwQxNpTk_8gP13snRMJpqcWzgqaaD_sxF3XGM5mrzu5Vm5nu3oT833vX6umjM0QughvPAA",
+    "domain": "steamcommunity.com",
+    "path": "/",
+    "secure": true,
+    "expires": 1790528923
+  },
+  {
+    "name": "Steam_Language",
+    "value": "english",
+    "domain": "steamcommunity.com",
+    "path": "/",
+    "secure": true,
+    "expires": 1790528925
+  },
+  {
+    "name": "browserid",
+    "value": "259639680067520250",
+    "domain": "steamcommunity.com",
+    "path": "/",
+    "secure": true,
+    "expires": 1787504925
+  },
+  {
+    "name": "sessionidSecureOpenIDNonce",
+    "value": "4dd5a28dec22b7a52c1dd965",
+    "domain": "steamcommunity.com",
+    "path": "/",
+    "secure": true,
+    "expires": 1755969225
+  }
+]
