@@ -101,19 +101,26 @@ def parse_item_attributes(item_name: str):
 	}
 
 
-async def _load_all_classifieds_orders(page):
+async def _load_all_classifieds_orders(page, max_scrolls=8):
 	"""
-	Подгрузка ордеров на странице classifieds: автоскролл пока число карточек растёт.
+	Оптимизированная подгрузка ордеров на странице classifieds.
+	Уменьшено количество скроллов и задержки.
 	"""
-	await asyncio.sleep(0.5)
+	await asyncio.sleep(0.3)  # Уменьшено с 0.5
 	last_total = -1
-	for _ in range(12):
+	
+	for i in range(max_scrolls):
 		await page.evaluate("window.scrollBy(0, document.body.scrollHeight)")
-		await asyncio.sleep(0.6)
+		await asyncio.sleep(0.4)  # Уменьшено с 0.6
+		
 		total = await page.locator('[data-listing_intent="buy"], [data-listing_intent="sell"]').count()
 		if total <= last_total:
 			break
 		last_total = total
+		
+		# Ранний выход если уже достаточно данных
+		if total >= 20:
+			break
 
 
 def _to_keys_if_possible(value: float, currency: str, key_price_ref: float | None):
@@ -140,7 +147,20 @@ class UpgradeArbitrage:
 		self.buy_items = []
 		self.price_mode = "avg23"
 		self.cached_sell = {}
+		self.cached_attributes = {}  # Кэш для парсинга атрибутов
 		self.runtime_key_price_ref = None  # определяем динамически, если не задано в конфиге
+		
+		# Оптимизированные настройки
+		self.delays = {
+			"page_load": 0.4,      # Уменьшено с 0.5
+			"between_requests": 0.4, # Уменьшено с 0.6
+			"scroll": 0.4,          # Уменьшено с 0.6
+			"retry": 0.2            # Новое - для retry
+		}
+		
+		# Retry настройки
+		self.max_retries = 2
+		self.retry_delay = 1.0
 
 		if self.config_file.exists():
 			try:
@@ -151,6 +171,14 @@ class UpgradeArbitrage:
 			except Exception as e:
 				logger.error(f"[Arbitrage] Ошибка при загрузке config.json: {e}")
 
+	def _get_cached_attributes(self, item_name: str):
+		"""
+		Получает атрибуты предмета из кэша или парсит заново
+		"""
+		if item_name not in self.cached_attributes:
+			self.cached_attributes[item_name] = parse_item_attributes(item_name)
+		return self.cached_attributes[item_name]
+
 	async def _detect_key_price_ref(self, page) -> float | None:
 		"""
 		Пытается определить цену ключа в ref, если KEY_PRICE_REF не задан:
@@ -160,7 +188,7 @@ class UpgradeArbitrage:
 			key_stats = "https://backpack.tf/stats/Unique/Mann%20Co.%20Supply%20Crate%20Key/Tradable/Craftable"
 			await page.goto(key_stats, timeout=90000, wait_until="domcontentloaded")
 			await page.locator('div.item[data-listing_intent="sell"]').first.wait_for(state="attached", timeout=90000)
-			await asyncio.sleep(0.5)
+			await asyncio.sleep(self.delays["page_load"])
 			sell_prices = await page.locator('div.item[data-listing_intent="sell"]').evaluate_all(
 				"elements => elements.map(e => e.getAttribute('data-listing_price'))"
 			)
@@ -181,15 +209,18 @@ class UpgradeArbitrage:
 	async def fetch_prices(self, page, items, intent):
 		results = {}
 		for item in items:
-			try:
-				# небольшая пауза между запросами
-				await asyncio.sleep(0.6)
+			# Оптимизированная пауза между запросами
+			await asyncio.sleep(self.delays["between_requests"])
+			
+			# Retry логика для обработки ошибок
+			for retry in range(self.max_retries + 1):
+				try:
 
 				if intent == "buy":
 					logger.info(f"[Arbitrage] Загружаю {item} (buy) через classifieds (scraping only)...")
 
-					# Парсим атрибуты предмета
-					item_attrs = parse_item_attributes(item)
+					# Парсим атрибуты предмета (с кэшированием)
+					item_attrs = self._get_cached_attributes(item)
 					logger.info(f"[Arbitrage][BUY] Атрибуты {item}: quality={item_attrs['quality']}, killstreak_tier={item_attrs['killstreak_tier']}, australium={item_attrs['australium']}, base_name='{item_attrs['base_name']}'")
 					item_enc = quote(item_attrs["base_name"], safe="")
 					
@@ -215,7 +246,7 @@ class UpgradeArbitrage:
 						url = base_url if page_num == 1 else f"{base_url}&page={page_num}"
 						logger.info(f"[Arbitrage][BUY/P1] URL → {url}")
 						await page.goto(url, timeout=90000, wait_until="domcontentloaded")
-						await asyncio.sleep(0.5)
+						await asyncio.sleep(self.delays["page_load"])
 						await page.locator('[data-listing_intent="sell"], [data-listing_intent="buy"]').first.wait_for(state="attached", timeout=90000)
 						await _load_all_classifieds_orders(page)
 
@@ -243,7 +274,7 @@ class UpgradeArbitrage:
 							break
 						prev_sell_count = len(page_sell_prices)
 
-						await asyncio.sleep(0.6)
+						await asyncio.sleep(self.delays["between_requests"])
 
 					if global_min_sell is None:
 						logger.warning(f"[Arbitrage] Нет пригодных SELL объявлений для {item} (keys/конверсия)")
@@ -285,7 +316,7 @@ class UpgradeArbitrage:
 							logger.info(f"[Arbitrage][BUY/P2] Early stop on page {page_num}: buy={best_buy:.2f} keys < global min sell={global_min_sell:.2f}")
 							break
 
-						await asyncio.sleep(0.6)
+						await asyncio.sleep(self.delays["between_requests"])
 
 					if best_buy is not None:
 						results[item] = {"value": round(best_buy, 2), "currency": "keys", "source": "ClassifiedsVerified"}
@@ -296,8 +327,8 @@ class UpgradeArbitrage:
 				else:
 					logger.info(f"[Arbitrage] Загружаю {item} (sell)...")
 
-					# Парсим атрибуты предмета
-					item_attrs = parse_item_attributes(item)
+					# Парсим атрибуты предмета (с кэшированием)
+					item_attrs = self._get_cached_attributes(item)
 					logger.info(f"[Arbitrage][SELL] Атрибуты {item}: quality={item_attrs['quality']}, killstreak_tier={item_attrs['killstreak_tier']}, australium={item_attrs['australium']}, base_name='{item_attrs['base_name']}'")
 					
 					# Определяем, нужно ли использовать classifieds вместо stats
@@ -319,7 +350,7 @@ class UpgradeArbitrage:
 						url = base_url
 						logger.info(f"[Arbitrage][SELL] Classifieds URL → {url}")
 						await page.goto(url, timeout=90000, wait_until="domcontentloaded")
-						await asyncio.sleep(0.5)
+						await asyncio.sleep(self.delays["page_load"])
 						await page.locator('[data-listing_intent="sell"]').first.wait_for(state="attached", timeout=90000)
 						await _load_all_classifieds_orders(page)
 						
@@ -416,25 +447,35 @@ class UpgradeArbitrage:
 						else:
 							raise Exception("Не удалось разобрать цены")
 
-			except Exception as e:
-				logger.error(f"[Arbitrage] Ошибка при обработке {item} ({intent}): {e}")
-				try:
-					span = page.locator("div.tag.bottom-right span").first
-					text = await span.inner_text()
-					val, curr = parse_price(text)
-					if val is None:
-						raise Exception("Suggested parse failed")
-					rounded_value = round(val, 2)
-					results[item] = {
-						"value": rounded_value,
-						"currency": curr or "unknown",
-						"source": "Suggested"
-					}
-				except Exception:
-					results[item] = {"value": 0.0, "currency": "unknown", "source": "None"}
+					# Если успешно обработали, выходим из retry цикла
+					break
+					
+				except Exception as e:
+					if retry < self.max_retries:
+						logger.warning(f"[Arbitrage] Попытка {retry + 1} для {item} не удалась: {e}")
+						await asyncio.sleep(self.delays["retry"])
+						continue
+					else:
+						logger.error(f"[Arbitrage] Все попытки для {item} не удались: {e}")
+						try:
+							# Fallback: пытаемся получить suggested цену
+							span = page.locator("div.tag.bottom-right span").first
+							text = await span.inner_text()
+							val, curr = parse_price(text)
+							if val is None:
+								raise Exception("Suggested parse failed")
+							rounded_value = round(val, 2)
+							results[item] = {
+								"value": rounded_value,
+								"currency": curr or "unknown",
+								"source": "Suggested"
+							}
+						except Exception:
+							results[item] = {"value": 0.0, "currency": "unknown", "source": "None"}
 		return results
 
 	async def run(self):
+		start_time = asyncio.get_event_loop().time()
 		results = {"sell": {}, "buy": {}}
 		async with async_playwright() as p:
 			browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
@@ -473,6 +514,14 @@ class UpgradeArbitrage:
 
 			page = await context.new_page()
 			await page.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9"})
+			
+			# Оптимизация производительности страницы
+			await page.add_init_script("""
+				// Отключаем ненужные функции для ускорения
+				Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+				Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+				Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+			""")
 
 			# Прогрев через stats (и логин при необходимости)
 			if self.sell_items:
@@ -482,8 +531,8 @@ class UpgradeArbitrage:
 			else:
 				pref_item = "Mann Co. Supply Crate Key"
 
-			# Парсим атрибуты предмета для прогрева
-			pref_attrs = parse_item_attributes(pref_item)
+			# Парсим атрибуты предмета для прогрева (с кэшированием)
+			pref_attrs = self._get_cached_attributes(pref_item)
 			quality_str = "Strange" if pref_attrs["quality"] == 11 else "Unique"
 			item_name = pref_attrs["base_name"]
 			
@@ -524,12 +573,19 @@ class UpgradeArbitrage:
 			if self.sell_items:
 				results["sell"] = await self.fetch_prices(page, self.sell_items, "sell")
 
-			await asyncio.sleep(0.8)
+			await asyncio.sleep(self.delays["between_requests"])
 
 			if self.buy_items:
 				results["buy"] = await self.fetch_prices(page, self.buy_items, "buy")
 
 			await browser.close()
+			
+			# Статистика производительности
+			total_time = asyncio.get_event_loop().time() - start_time
+			total_items = len(self.sell_items) + len(self.buy_items)
+			avg_time_per_item = total_time / total_items if total_items > 0 else 0
+			
+			logger.info(f"[Arbitrage] Статистика: общее время={total_time:.2f}с, предметов={total_items}, среднее время на предмет={avg_time_per_item:.2f}с")
 		return results
 
 
