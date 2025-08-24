@@ -203,53 +203,87 @@ class UpgradeArbitrage:
 	async def run(self):
 		results = {"sell": {}, "buy": {}}
 		async with async_playwright() as p:
-			browser = await p.chromium.launch(headless=True, args=["--no-sandbox"]) 
-			context = await browser.new_context(
-				user_agent=(
-					"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-					"AppleWebKit/537.36 (KHTML, like Gecko) "
-					"Chrome/120.0.0.0 Safari/537.36"
-				),
-				locale="en-US",
-				java_script_enabled=True,
-				viewport={"width": 1366, "height": 768},
+			async def make_context(headless: bool):
+				browser = await p.chromium.launch(headless=headless, args=["--no-sandbox"]) 
+				context = await browser.new_context(
+					user_agent=(
+						"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+						"AppleWebKit/537.36 (KHTML, like Gecko) "
+						"Chrome/120.0.0.0 Safari/537.36"
+					),
+					locale="en-US",
+					java_script_enabled=True,
+					viewport={"width": 1366, "height": 768},
+				)
+				await context.add_init_script(
+					"Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+				)
+
+				# Загружаем куки и нормализуем домены/sameSite
+				if self.cookies_file.exists():
+					try:
+						cookies = json.loads(self.cookies_file.read_text())
+						norm_cookies = []
+						for c in cookies:
+							cookie = dict(c)
+							if "expires" in cookie and not isinstance(cookie.get("expires"), (int, float)):
+								cookie.pop("expires")
+							domain = cookie.get("domain")
+							if domain and not domain.startswith("."):
+								cookie["domain"] = f".{domain}"
+							cookie.setdefault("sameSite", "Lax")
+							norm_cookies.append(cookie)
+						await context.add_cookies(norm_cookies)
+						logger.info("[Arbitrage] Куки подгружены")
+					except Exception as e:
+						logger.error(f"[Arbitrage] Ошибка при загрузке куки: {e}")
+
+				page = await context.new_page()
+				await page.set_extra_http_headers({
+					"Accept-Language": "en-US,en;q=0.9",
+				})
+				return browser, context, page
+
+			# Выбираем тестовый URL classifieds для проверки сессии
+			test_item = (self.buy_items[0] if self.buy_items else (self.sell_items[0] if self.sell_items else "Shotgun"))
+			is_strange = test_item.lower().startswith("strange ")
+			quality = 11 if is_strange else 6
+			item_name = test_item.replace("Strange ", "").strip()
+			test_url = (
+				f"https://backpack.tf/classifieds?item={quote(item_name, safe='')}"
+				f"&quality={quality}&tradable=1&craftable=1&australium=-1&killstreak_tier=0"
 			)
-			# скрываем webdriver
-			await context.add_init_script(
-				"Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
-			)
 
-			# Загружаем куки и нормализуем домены/sameSite
-			if self.cookies_file.exists():
-				try:
-					cookies = json.loads(self.cookies_file.read_text())
-					norm_cookies = []
-					for c in cookies:
-						cookie = dict(c)
-						if "expires" in cookie and not isinstance(cookie.get("expires"), (int, float)):
-							cookie.pop("expires")
-						domain = cookie.get("domain")
-						if domain and not domain.startswith("."):
-							cookie["domain"] = f".{domain}"
-						cookie.setdefault("sameSite", "Lax")
-						norm_cookies.append(cookie)
-					await context.add_cookies(norm_cookies)
-					logger.info("[Arbitrage] Куки подгружены")
-				except Exception as e:
-					logger.error(f"[Arbitrage] Ошибка при загрузке куки: {e}")
-
-			page = await context.new_page()
-			await page.set_extra_http_headers({
-				"Accept-Language": "en-US,en;q=0.9",
-			})
-
-			# Предварительный логин, чтобы classifieds не редиректили на Steam OpenID
+			# 1) Пытаемся в headless с уже имеющимися куки
+			browser, context, page = await make_context(True)
 			try:
-				await page.goto("https://backpack.tf/login", timeout=60000, wait_until="networkidle")
-				logger.info(f"[Arbitrage][LOGIN] At → {page.url}")
-			except Exception:
-				pass
+				await page.goto(test_url, timeout=60000, wait_until="domcontentloaded")
+				if "steamcommunity.com/openid/login" in page.url:
+					await browser.close()
+					# 2) Открываем интерактивно, просим пользователя залогиниться один раз
+					browser, context, page = await make_context(False)
+					await page.goto(test_url, timeout=60000)
+					logger.info("[Arbitrage][LOGIN] Открылся логин Steam. Заверши вход в открытом окне.")
+					try:
+						await page.wait_for_url("**backpack.tf/**", timeout=180000)
+						# сохраняем куки сессии
+						try:
+							cookies = await context.cookies()
+							for c in cookies:
+								if "expires" in c and not isinstance(c.get("expires"), (int, float)):
+									c["expires"] = -1
+							Path("cookies.json").write_text(json.dumps(cookies, indent=2))
+							logger.info("[Arbitrage] Сессионные куки сохранены в cookies.json")
+						except Exception as e:
+							logger.error(f"[Arbitrage] Не удалось сохранить куки: {e}")
+					finally:
+						await browser.close()
+					# 3) Пересоздаём headless контекст с обновлёнными куки
+					browser, context, page = await make_context(True)
+				except Exception as e:
+					logger.error(f"[Arbitrage][LOGIN] Ошибка при проверке сессии: {e}")
 
+			# Дальнейший скраппинг в текущем headless контексте/странице
 			if self.sell_items:
 				results["sell"] = await self.fetch_prices(page, self.sell_items, "sell")
 
