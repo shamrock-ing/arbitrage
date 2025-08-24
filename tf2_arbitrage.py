@@ -294,79 +294,127 @@ class UpgradeArbitrage:
 						results[item] = {"value": 0.0, "currency": "unknown", "source": "None"}
 
 				else:
-					logger.info(f"[Arbitrage] Загружаю {item} (sell) через stats...")
+					logger.info(f"[Arbitrage] Загружаю {item} (sell)...")
 
 					# Парсим атрибуты предмета
 					item_attrs = parse_item_attributes(item)
 					logger.info(f"[Arbitrage][SELL] Атрибуты {item}: quality={item_attrs['quality']}, killstreak_tier={item_attrs['killstreak_tier']}, australium={item_attrs['australium']}, base_name='{item_attrs['base_name']}'")
 					
-					# Определяем quality string для stats URL
-					if item_attrs["quality"] == 11:
-						quality_str = "Strange"
+					# Определяем, нужно ли использовать classifieds вместо stats
+					use_classifieds = item_attrs["killstreak_tier"] > 0 or item_attrs["australium"]
+					
+					if use_classifieds:
+						logger.info(f"[Arbitrage] Используем classifieds для {item} (сложные атрибуты)")
+						
+						# Используем classifieds для sell (как для buy)
+						item_enc = quote(item_attrs["base_name"], safe="")
+						australium_param = "1" if item_attrs["australium"] else "-1"
+						
+						base_url = (
+							f"https://backpack.tf/classifieds?item={item_enc}"
+							f"&quality={item_attrs['quality']}&tradable=1&craftable=1&australium={australium_param}&killstreak_tier={item_attrs['killstreak_tier']}"
+						)
+						
+						# Получаем sell цены через classifieds
+						url = base_url
+						logger.info(f"[Arbitrage][SELL] Classifieds URL → {url}")
+						await page.goto(url, timeout=90000, wait_until="domcontentloaded")
+						await asyncio.sleep(0.5)
+						await page.locator('[data-listing_intent="sell"]').first.wait_for(state="attached", timeout=90000)
+						await _load_all_classifieds_orders(page)
+						
+						sell_prices = await page.locator('[data-listing_intent="sell"]').evaluate_all(
+							"elements => elements.map(e => e.getAttribute('data-listing_price'))"
+						)
+						
+						logger.info(f"[DEBUG] Нашёл {len(sell_prices)} sell объявлений в classifieds для {item}: {sell_prices}")
+						
+						if self.price_mode == "first":
+							price_texts = sell_prices[:1]
+						elif self.price_mode == "avg23" and len(sell_prices) >= 3:
+							price_texts = sell_prices[1:3]
+						else:
+							price_texts = sell_prices[:1]
+						
+						values = []
+						currency = None
+						for pt in price_texts:
+							val, curr = parse_price(pt)
+							if val is not None:
+								values.append(val)
+								if not currency:
+									currency = curr
+						
+						if values:
+							avg_value = sum(values) / len(values)
+							rounded_value = round(avg_value, 2)
+							self.cached_sell[item] = rounded_value
+							price_text = f"{rounded_value:.2f} {currency}"
+							source = "ClassifiedsSell"
+							logger.info(f"[Arbitrage] Цена {item} (sell): {price_text} ({source})")
+							results[item] = {
+								"value": rounded_value,
+								"currency": currency,
+								"source": source
+							}
+						else:
+							raise Exception("Не удалось разобрать цены из classifieds")
+						
 					else:
-						quality_str = "Unique"
-					
-					item_enc = quote(item_attrs["base_name"], safe="")
-					
-					# Строим URL с учётом всех атрибутов
-					base_url = f"https://backpack.tf/stats/{quality_str}/{item_enc}/Tradable/Craftable"
-					
-					# Для australium предметов добавляем /Australium
-					if item_attrs["australium"]:
-						base_url += "/Australium"
-					
-					# Для killstreak предметов добавляем killstreak_tier параметр
-					killstreak_param = ""
-					if item_attrs["killstreak_tier"] > 0:
-						killstreak_param = f"&killstreak_tier={item_attrs['killstreak_tier']}"
-					
-					url = base_url + killstreak_param
-					
-					# Дополнительное логирование для отладки
-					logger.info(f"[Arbitrage][SELL] URL построен: base_url='{base_url}', killstreak_param='{killstreak_param}', final_url='{url}'")
-					logger.info(f"[Arbitrage][SELL] URL → {url}")
-					await page.goto(url, timeout=90000, wait_until="domcontentloaded")
-					logger.info(f"[Arbitrage][SELL] At → {page.url}")
+						logger.info(f"[Arbitrage] Используем stats для {item} (простые атрибуты)")
+						
+						# Используем stats для простых предметов
+						if item_attrs["quality"] == 11:
+							quality_str = "Strange"
+						else:
+							quality_str = "Unique"
+						
+						item_enc = quote(item_attrs["base_name"], safe="")
+						url = f"https://backpack.tf/stats/{quality_str}/{item_enc}/Tradable/Craftable"
+						
+						logger.info(f"[Arbitrage][SELL] Stats URL → {url}")
+						await page.goto(url, timeout=90000, wait_until="domcontentloaded")
+						logger.info(f"[Arbitrage][SELL] At → {page.url}")
 
-					selector = 'div.item[data-listing_intent="sell"]'
-					await page.locator(selector).first.wait_for(state="attached", timeout=90000)
+						selector = 'div.item[data-listing_intent="sell"]'
+						await page.locator(selector).first.wait_for(state="attached", timeout=90000)
 
-					prices = await page.locator(selector).evaluate_all(
-						"elements => elements.map(e => e.getAttribute('data-listing_price'))"
-					)
+						prices = await page.locator(selector).evaluate_all(
+							"elements => elements.map(e => e.getAttribute('data-listing_price'))"
+						)
 
-					logger.info(f"[DEBUG] Нашёл {len(prices)} объявлений для {item} (sell): {prices}")
+						logger.info(f"[DEBUG] Нашёл {len(prices)} объявлений для {item} (sell): {prices}")
 
-					if self.price_mode == "first":
-						price_texts = prices[:1]
-					elif self.price_mode == "avg23" and len(prices) >= 3:
-						price_texts = prices[1:3]
-					else:
-						price_texts = prices[:1]
+						if self.price_mode == "first":
+							price_texts = prices[:1]
+						elif self.price_mode == "avg23" and len(prices) >= 3:
+							price_texts = prices[1:3]
+						else:
+							price_texts = prices[:1]
 
-					values = []
-					currency = None
-					for pt in price_texts:
-						val, curr = parse_price(pt)
-						if val is not None:
-							values.append(val)
-							if not currency:
-								currency = curr
+						values = []
+						currency = None
+						for pt in price_texts:
+							val, curr = parse_price(pt)
+							if val is not None:
+								values.append(val)
+								if not currency:
+									currency = curr
 
-					if values:
-						avg_value = sum(values) / len(values)
-						rounded_value = round(avg_value, 2)
-						self.cached_sell[item] = rounded_value
-						price_text = f"{rounded_value:.2f} {currency}"
-						source = "SELLOrders"
-						logger.info(f"[Arbitrage] Цена {item} (sell): {price_text} ({source})")
-						results[item] = {
-							"value": rounded_value,
-							"currency": currency,
-							"source": source
-						}
-					else:
-						raise Exception("Не удалось разобрать цены")
+						if values:
+							avg_value = sum(values) / len(values)
+							rounded_value = round(avg_value, 2)
+							self.cached_sell[item] = rounded_value
+							price_text = f"{rounded_value:.2f} {currency}"
+							source = "SELLOrders"
+							logger.info(f"[Arbitrage] Цена {item} (sell): {price_text} ({source})")
+							results[item] = {
+								"value": rounded_value,
+								"currency": currency,
+								"source": source
+							}
+						else:
+							raise Exception("Не удалось разобрать цены")
 
 			except Exception as e:
 				logger.error(f"[Arbitrage] Ошибка при обработке {item} ({intent}): {e}")
