@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 from playwright.async_api import async_playwright
 from urllib.parse import quote
-from backpack_classifieds import BackpackClassifiedsHTML
 
 logger = logging.getLogger("tf2-arbitrage")
 
@@ -79,18 +78,6 @@ class UpgradeArbitrage:
 			try:
 				if intent == "buy":
 					logger.info(f"[Arbitrage] Загружаю {item} (buy) через classifieds (scraping only)...")
-
-					# HTML (requests+BS4) попытка до Playwright, чтобы обойти логин-редиректы
-					try:
-						html_client = BackpackClassifiedsHTML()
-						min_sell_keys, verified_buy = html_client.get_min_sell_and_verified_buy(item)
-						if min_sell_keys is not None and verified_buy is not None:
-							rounded_value = round(verified_buy, 2)
-							results[item] = {"value": rounded_value, "currency": "keys", "source": "ClassifiedsHTML"}
-							logger.info(f"[Arbitrage] (HTML-direct) {item}: buy={rounded_value:.2f} keys, min sell={min_sell_keys:.2f} keys")
-							continue
-					except Exception:
-						pass
 
 					# Готовим параметры classifieds: убираем Strange и выставляем quality
 					is_strange = item.lower().startswith("strange ")
@@ -232,13 +219,21 @@ class UpgradeArbitrage:
 				"Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
 			)
 
+			# Загружаем куки и нормализуем домены/sameSite
 			if self.cookies_file.exists():
 				try:
 					cookies = json.loads(self.cookies_file.read_text())
+					norm_cookies = []
 					for c in cookies:
-						if "expires" in c and not isinstance(c["expires"], (int, float)):
-							c.pop("expires")
-					await context.add_cookies(cookies)
+						cookie = dict(c)
+						if "expires" in cookie and not isinstance(cookie.get("expires"), (int, float)):
+							cookie.pop("expires")
+						domain = cookie.get("domain")
+						if domain and not domain.startswith("."):
+							cookie["domain"] = f".{domain}"
+						cookie.setdefault("sameSite", "Lax")
+						norm_cookies.append(cookie)
+					await context.add_cookies(norm_cookies)
 					logger.info("[Arbitrage] Куки подгружены")
 				except Exception as e:
 					logger.error(f"[Arbitrage] Ошибка при загрузке куки: {e}")
@@ -247,6 +242,13 @@ class UpgradeArbitrage:
 			await page.set_extra_http_headers({
 				"Accept-Language": "en-US,en;q=0.9",
 			})
+
+			# Предварительный логин, чтобы classifieds не редиректили на Steam OpenID
+			try:
+				await page.goto("https://backpack.tf/login", timeout=60000, wait_until="networkidle")
+				logger.info(f"[Arbitrage][LOGIN] At → {page.url}")
+			except Exception:
+				pass
 
 			if self.sell_items:
 				results["sell"] = await self.fetch_prices(page, self.sell_items, "sell")
