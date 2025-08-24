@@ -203,7 +203,7 @@ class UpgradeArbitrage:
 				"name": "Professional Killstreak Kit", 
 				"killstreak_tier": 3,
 				"price_range": "2 keys 20 ref",
-				"avg_price_ref": 140.0  # 2 keys * 52 ref + 20 ref = 124 + 20 = 144, но берём 140 как среднее
+				"avg_price_ref": 124.0  # 2 keys * 52 ref + 20 ref = 104 + 20 = 124 ref
 			}
 		}
 		

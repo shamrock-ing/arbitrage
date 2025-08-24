@@ -19,7 +19,7 @@
 - **Пример**: "Strange Specialized Killstreak Rocket Launcher"
 
 ### Professional Killstreak Kit  
-- **Стоимость**: 2 keys 20 ref (в среднем 140 ref)
+- **Стоимость**: 2 keys 20 ref (в среднем 124 ref)
 - **Тип**: killstreak_tier = 3
 - **Пример**: "Strange Professional Killstreak Rocket Launcher"
 
