@@ -3,9 +3,6 @@ import json
 import logging
 from pathlib import Path
 from playwright.async_api import async_playwright
-import requests
-from typing import Optional, Tuple
-from config import BPTF_TOKEN
 
 logger = logging.getLogger("tf2-arbitrage")
 
@@ -126,18 +123,7 @@ class UpgradeArbitrage:
 		for item in items:
 			try:
 				if intent == "buy":
-					logger.info(f"[Arbitrage] Загружаю {item} (buy) через classifieds API...")
-
-					# 1) Сначала пробуем API как в TF2Autobot
-					min_sell_keys, verified_buy = fetch_classifieds_api_min_sell_and_verified_buy(item)
-					if min_sell_keys is not None and verified_buy is not None:
-						rounded_value = round(verified_buy, 2)
-						results[item] = {"value": rounded_value, "currency": "keys", "source": "ClassifiedsAPI"}
-						logger.info(f"[Arbitrage] (API) {item}: buy={rounded_value:.2f} keys, min sell={min_sell_keys:.2f} keys")
-						continue
-
-					# 2) Фоллбек — HTML/страница (нынешний Playwright-скрап)
-					logger.info(f"[Arbitrage] API не дал результат, пробую HTML classifieds для {item}...")
+					logger.info(f"[Arbitrage] Загружаю {item} (buy) через classifieds (scraping only)...")
 
 					classifieds_item = item.strip()
 					url_class = f"https://backpack.tf/classifieds?item={classifieds_item.replace(' ', '%20')}"
