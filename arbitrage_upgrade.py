@@ -52,8 +52,6 @@ def parse_price(text: str):
 	return None, None
 
 
-
-
 class UpgradeArbitrage:
 	def __init__(self):
 		self.cookies_file = Path("cookies.json")
@@ -80,8 +78,15 @@ class UpgradeArbitrage:
 				if intent == "buy":
 					logger.info(f"[Arbitrage] Загружаю {item} (buy) через classifieds (scraping only)...")
 
-					classifieds_item = item.strip()
-					url_class = f"https://backpack.tf/classifieds?item={classifieds_item.replace(' ', '%20')}"
+					# Готовим параметры classifieds: убираем Strange и выставляем quality
+					is_strange = item.lower().startswith("strange ")
+					quality = 11 if is_strange else 6
+					item_name = item.replace("Strange ", "").strip()
+					item_enc = item_name.replace(" ", "%20")
+					url_class = (
+						f"https://backpack.tf/classifieds?item={item_enc}"
+						f"&quality={quality}&tradable=1&craftable=1&australium=-1&killstreak_tier=0"
+					)
 					await page.goto(url_class, timeout=60000, wait_until="networkidle")
 
 					await page.locator('[data-listing_intent="sell"], [data-listing_intent="buy"]').first.wait_for(state="attached", timeout=60000)
