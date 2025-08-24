@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from playwright.async_api import async_playwright
 from urllib.parse import quote
+from backpack_classifieds import BackpackClassifiedsHTML
 
 logger = logging.getLogger("tf2-arbitrage")
 
@@ -78,6 +79,18 @@ class UpgradeArbitrage:
 			try:
 				if intent == "buy":
 					logger.info(f"[Arbitrage] Загружаю {item} (buy) через classifieds (scraping only)...")
+
+					# HTML (requests+BS4) попытка до Playwright, чтобы обойти логин-редиректы
+					try:
+						html_client = BackpackClassifiedsHTML()
+						min_sell_keys, verified_buy = html_client.get_min_sell_and_verified_buy(item)
+						if min_sell_keys is not None and verified_buy is not None:
+							rounded_value = round(verified_buy, 2)
+							results[item] = {"value": rounded_value, "currency": "keys", "source": "ClassifiedsHTML"}
+							logger.info(f"[Arbitrage] (HTML-direct) {item}: buy={rounded_value:.2f} keys, min sell={min_sell_keys:.2f} keys")
+							continue
+					except Exception:
+						pass
 
 					# Готовим параметры classifieds: убираем Strange и выставляем quality
 					is_strange = item.lower().startswith("strange ")
