@@ -149,6 +149,7 @@ class UpgradeArbitrage:
 		self.cached_sell = {}
 		self.cached_attributes = {}  # Кэш для парсинга атрибутов
 		self.runtime_key_price_ref = None  # определяем динамически, если не задано в конфиге
+		self.upgrade_analysis_items = []  # Предметы для анализа рентабельности апгрейдов
 		
 		# Оптимизированные настройки
 		self.delays = {
@@ -168,6 +169,7 @@ class UpgradeArbitrage:
 				self.sell_items = config.get("sell_items", [])
 				self.buy_items = config.get("buy_items", [])
 				self.price_mode = config.get("price_mode", "avg23")
+				self.upgrade_analysis_items = config.get("upgrade_analysis_items", [])
 			except Exception as e:
 				logger.error(f"[Arbitrage] Ошибка при загрузке config.json: {e}")
 
@@ -178,6 +180,225 @@ class UpgradeArbitrage:
 		if item_name not in self.cached_attributes:
 			self.cached_attributes[item_name] = parse_item_attributes(item_name)
 		return self.cached_attributes[item_name]
+
+	async def analyze_upgrade_profitability(self, page, base_item: str, kit_type: str = "specialized"):
+		"""
+		Анализирует рентабельность апгрейда предмета:
+		- base_item: базовый предмет (например, "Rocket Launcher")
+		- kit_type: тип кита ("specialized" или "professional")
+		
+		Возвращает анализ с расчётом прибыли/убытка
+		"""
+		logger.info(f"[Upgrade Analysis] Анализирую рентабельность апгрейда {base_item} с {kit_type} killstreak kit")
+		
+		# Определяем параметры кита
+		kit_info = {
+			"specialized": {
+				"name": "Specialized Killstreak Kit",
+				"killstreak_tier": 2,
+				"price_range": "47-50 ref",
+				"avg_price_ref": 48.5
+			},
+			"professional": {
+				"name": "Professional Killstreak Kit", 
+				"killstreak_tier": 3,
+				"price_range": "2 keys 20 ref",
+				"avg_price_ref": 140.0  # 2 keys * 52 ref + 20 ref = 124 + 20 = 144, но берём 140 как среднее
+			}
+		}
+		
+		if kit_type not in kit_info:
+			logger.error(f"[Upgrade Analysis] Неподдерживаемый тип кита: {kit_type}")
+			return None
+		
+		kit = kit_info[kit_type]
+		
+		# Получаем цену базового предмета (sell)
+		logger.info(f"[Upgrade Analysis] Получаю цену базового предмета: {base_item}")
+		base_prices = await self.fetch_prices(page, [base_item], "sell")
+		if not base_prices or base_item not in base_prices:
+			logger.error(f"[Upgrade Analysis] Не удалось получить цену базового предмета {base_item}")
+			return None
+		
+		base_price_data = base_prices[base_item]
+		base_price_value = base_price_data["value"]
+		base_price_currency = base_price_data["currency"]
+		
+		# Конвертируем базовую цену в ref для расчётов
+		base_price_ref = 0
+		if base_price_currency == "ref":
+			base_price_ref = base_price_value
+		elif base_price_currency == "keys":
+			# Получаем актуальную цену ключа
+			if not self.runtime_key_price_ref:
+				self.runtime_key_price_ref = await self._detect_key_price_ref(page)
+			key_price = self.runtime_key_price_ref or KEY_PRICE_REF or 50.0
+			base_price_ref = base_price_value * key_price
+		
+		logger.info(f"[Upgrade Analysis] Базовая цена {base_item}: {base_price_value} {base_price_currency} = {base_price_ref:.2f} ref")
+		
+		# Получаем цену апгрейднутого предмета (buy)
+		upgraded_item_name = f"Strange {kit['name']} {base_item}"
+		logger.info(f"[Upgrade Analysis] Получаю цену апгрейднутого предмета: {upgraded_item_name}")
+		
+		upgraded_prices = await self.fetch_prices(page, [upgraded_item_name], "buy")
+		if not upgraded_prices or upgraded_item_name not in upgraded_prices:
+			logger.error(f"[Upgrade Analysis] Не удалось получить цену апгрейднутого предмета {upgraded_item_name}")
+			return None
+		
+		upgraded_price_data = upgraded_prices[upgraded_item_name]
+		upgraded_price_value = upgraded_price_data["value"]
+		upgraded_price_currency = upgraded_price_data["currency"]
+		
+		# Конвертируем цену апгрейда в ref
+		upgraded_price_ref = 0
+		if upgraded_price_currency == "ref":
+			upgraded_price_ref = upgraded_price_value
+		elif upgraded_price_currency == "keys":
+			key_price = self.runtime_key_price_ref or KEY_PRICE_REF or 50.0
+			upgraded_price_ref = upgraded_price_value * key_price
+		
+		logger.info(f"[Upgrade Analysis] Цена апгрейда {upgraded_item_name}: {upgraded_price_value} {upgraded_price_currency} = {upgraded_price_ref:.2f} ref")
+		
+		# Расчёт стоимости апгрейда
+		kit_cost_ref = kit["avg_price_ref"]
+		total_upgrade_cost = base_price_ref + kit_cost_ref
+		
+		# Расчёт прибыли/убытка
+		profit_ref = upgraded_price_ref - total_upgrade_cost
+		profit_percent = (profit_ref / total_upgrade_cost) * 100 if total_upgrade_cost > 0 else 0
+		
+		# Формируем результат
+		result = {
+			"base_item": base_item,
+			"kit_type": kit_type,
+			"kit_name": kit["name"],
+			"base_price": {
+				"value": base_price_value,
+				"currency": base_price_currency,
+				"ref": base_price_ref
+			},
+			"kit_cost": {
+				"ref": kit_cost_ref,
+				"range": kit["price_range"]
+			},
+			"upgraded_item": upgraded_item_name,
+			"upgraded_price": {
+				"value": upgraded_price_value,
+				"currency": upgraded_price_currency,
+				"ref": upgraded_price_ref
+			},
+			"total_cost": total_upgrade_cost,
+			"profit": {
+				"ref": profit_ref,
+				"percent": profit_percent,
+				"is_profitable": profit_ref > 0
+			},
+			"analysis": {
+				"recommendation": "ПРИБЫЛЬНО" if profit_ref > 0 else "УБЫТОЧНО",
+				"roi": f"{profit_percent:.1f}%",
+				"break_even": f"{(kit_cost_ref / (upgraded_price_ref - base_price_ref) * 100):.1f}%" if upgraded_price_ref > base_price_ref else "Невозможно"
+			}
+		}
+		
+		# Логируем результат
+		logger.info(f"[Upgrade Analysis] === РЕЗУЛЬТАТ АНАЛИЗА АПГРЕЙДА ===")
+		logger.info(f"[Upgrade Analysis] Предмет: {base_item}")
+		logger.info(f"[Upgrade Analysis] Кит: {kit['name']} ({kit['price_range']})")
+		logger.info(f"[Upgrade Analysis] Базовая цена: {base_price_value} {base_price_currency} ({base_price_ref:.2f} ref)")
+		logger.info(f"[Upgrade Analysis] Стоимость кита: {kit_cost_ref:.2f} ref")
+		logger.info(f"[Upgrade Analysis] Общая стоимость: {total_upgrade_cost:.2f} ref")
+		logger.info(f"[Upgrade Analysis] Цена апгрейда: {upgraded_price_value} {upgraded_price_currency} ({upgraded_price_ref:.2f} ref)")
+		logger.info(f"[Upgrade Analysis] Прибыль/убыток: {profit_ref:.2f} ref ({profit_percent:.1f}%)")
+		logger.info(f"[Upgrade Analysis] Рекомендация: {result['analysis']['recommendation']}")
+		
+		return result
+
+	async def analyze_multiple_upgrades(self, page, base_items: list, kit_types: list = None):
+		"""
+		Анализирует рентабельность апгрейдов для нескольких предметов
+		
+		Args:
+			base_items: список базовых предметов для анализа
+			kit_types: список типов китов для анализа (по умолчанию ["specialized", "professional"])
+		
+		Returns:
+			Словарь с результатами анализа для каждого предмета и типа кита
+		"""
+		if kit_types is None:
+			kit_types = ["specialized", "professional"]
+		
+		logger.info(f"[Upgrade Analysis] Запускаю массовый анализ апгрейдов для {len(base_items)} предметов")
+		
+		results = {}
+		
+		for base_item in base_items:
+			results[base_item] = {}
+			for kit_type in kit_types:
+				try:
+					logger.info(f"[Upgrade Analysis] Анализирую {base_item} + {kit_type} kit...")
+					analysis = await self.analyze_upgrade_profitability(page, base_item, kit_type)
+					results[base_item][kit_type] = analysis
+					
+					# Небольшая пауза между запросами
+					await asyncio.sleep(self.delays["between_requests"])
+					
+				except Exception as e:
+					logger.error(f"[Upgrade Analysis] Ошибка при анализе {base_item} + {kit_type}: {e}")
+					results[base_item][kit_type] = {"error": str(e)}
+		
+		# Выводим сводный отчёт
+		self._print_upgrade_summary(results)
+		
+		return results
+
+	def _print_upgrade_summary(self, results: dict):
+		"""
+		Выводит красивый сводный отчёт по всем апгрейдам
+		"""
+		logger.info(f"[Upgrade Analysis] {'='*80}")
+		logger.info(f"[Upgrade Analysis] СВОДНЫЙ ОТЧЁТ ПО АНАЛИЗУ АПГРЕЙДОВ")
+		logger.info(f"[Upgrade Analysis] {'='*80}")
+		
+		profitable_upgrades = []
+		unprofitable_upgrades = []
+		
+		for base_item, kit_results in results.items():
+			logger.info(f"[Upgrade Analysis] {base_item}:")
+			
+			for kit_type, analysis in kit_results.items():
+				if "error" in analysis:
+					logger.info(f"[Upgrade Analysis]   {kit_type}: ОШИБКА - {analysis['error']}")
+					continue
+				
+				profit = analysis["profit"]["ref"]
+				profit_percent = analysis["profit"]["percent"]
+				recommendation = analysis["analysis"]["recommendation"]
+				
+				if profit > 0:
+					profitable_upgrades.append((base_item, kit_type, profit, profit_percent))
+					logger.info(f"[Upgrade Analysis]   {kit_type}: ✅ {recommendation} (+{profit:.2f} ref, +{profit_percent:.1f}%)")
+				else:
+					unprofitable_upgrades.append((base_item, kit_type, profit, profit_percent))
+					logger.info(f"[Upgrade Analysis]   {kit_type}: ❌ {recommendation} ({profit:.2f} ref, {profit_percent:.1f}%)")
+		
+		# Сортируем по прибыльности
+		profitable_upgrades.sort(key=lambda x: x[2], reverse=True)
+		unprofitable_upgrades.sort(key=lambda x: x[2])
+		
+		logger.info(f"[Upgrade Analysis] {'='*80}")
+		logger.info(f"[Upgrade Analysis] ТОП ПРИБЫЛЬНЫХ АПГРЕЙДОВ:")
+		for i, (item, kit, profit, percent) in enumerate(profitable_upgrades[:5], 1):
+			logger.info(f"[Upgrade Analysis] {i}. {item} + {kit}: +{profit:.2f} ref (+{percent:.1f}%)")
+		
+		if unprofitable_upgrades:
+			logger.info(f"[Upgrade Analysis] {'='*80}")
+			logger.info(f"[Upgrade Analysis] НЕПРИБЫЛЬНЫЕ АПГРЕЙДЫ:")
+			for i, (item, kit, profit, percent) in enumerate(unprofitable_upgrades[:5], 1):
+				logger.info(f"[Upgrade Analysis] {i}. {item} + {kit}: {profit:.2f} ref ({percent:.1f}%)")
+		
+		logger.info(f"[Upgrade Analysis] {'='*80}")
+		logger.info(f"[Upgrade Analysis] Всего прибыльных: {len(profitable_upgrades)}, неприбыльных: {len(unprofitable_upgrades)}")
 
 	async def _detect_key_price_ref(self, page) -> float | None:
 		"""
@@ -231,11 +452,11 @@ class UpgradeArbitrage:
 							f"&quality={item_attrs['quality']}&tradable=1&craftable=1&australium={australium_param}&killstreak_tier={item_attrs['killstreak_tier']}"
 						)
 
-					# Определяем цену ключа в ref (если не задана в конфиге) один раз за сессию
-					effective_key_ref = KEY_PRICE_REF or self.runtime_key_price_ref
-					if not effective_key_ref:
-						self.runtime_key_price_ref = await self._detect_key_price_ref(page)
-						effective_key_ref = self.runtime_key_price_ref
+						# Определяем цену ключа в ref (если не задана в конфиге) один раз за сессию
+						effective_key_ref = KEY_PRICE_REF or self.runtime_key_price_ref
+						if not effective_key_ref:
+							self.runtime_key_price_ref = await self._detect_key_price_ref(page)
+							effective_key_ref = self.runtime_key_price_ref
 
 					# PASS 1: глобальный min SELL (в ключах; конвертируем ref при необходимости)
 					global_min_sell = None
@@ -323,128 +544,128 @@ class UpgradeArbitrage:
 						logger.warning(f"[Arbitrage] Не нашёл buy ниже глобального min sell для {item}")
 						results[item] = {"value": 0.0, "currency": "unknown", "source": "None"}
 
-				else:
-					logger.info(f"[Arbitrage] Загружаю {item} (sell)...")
+					if intent == "sell":
+						logger.info(f"[Arbitrage] Загружаю {item} (sell)...")
 
-					# Парсим атрибуты предмета (с кэшированием)
-					item_attrs = self._get_cached_attributes(item)
-					logger.info(f"[Arbitrage][SELL] Атрибуты {item}: quality={item_attrs['quality']}, killstreak_tier={item_attrs['killstreak_tier']}, australium={item_attrs['australium']}, base_name='{item_attrs['base_name']}'")
-					
-					# Определяем, нужно ли использовать classifieds вместо stats
-					use_classifieds = item_attrs["killstreak_tier"] > 0 or item_attrs["australium"]
-					
-					if use_classifieds:
-						logger.info(f"[Arbitrage] Используем classifieds для {item} (сложные атрибуты)")
+						# Парсим атрибуты предмета (с кэшированием)
+						item_attrs = self._get_cached_attributes(item)
+						logger.info(f"[Arbitrage][SELL] Атрибуты {item}: quality={item_attrs['quality']}, killstreak_tier={item_attrs['killstreak_tier']}, australium={item_attrs['australium']}, base_name='{item_attrs['base_name']}'")
 						
-						# Используем classifieds для sell (как для buy)
-						item_enc = quote(item_attrs["base_name"], safe="")
-						australium_param = "1" if item_attrs["australium"] else "-1"
+						# Определяем, нужно ли использовать classifieds вместо stats
+						use_classifieds = item_attrs["killstreak_tier"] > 0 or item_attrs["australium"]
 						
-						base_url = (
-							f"https://backpack.tf/classifieds?item={item_enc}"
-							f"&quality={item_attrs['quality']}&tradable=1&craftable=1&australium={australium_param}&killstreak_tier={item_attrs['killstreak_tier']}"
-						)
-						
-						# Получаем sell цены через classifieds
-						url = base_url
-						logger.info(f"[Arbitrage][SELL] Classifieds URL → {url}")
-						await page.goto(url, timeout=90000, wait_until="domcontentloaded")
-						await asyncio.sleep(self.delays["page_load"])
-						await page.locator('[data-listing_intent="sell"]').first.wait_for(state="attached", timeout=90000)
-						await _load_all_classifieds_orders(page)
-						
-						sell_prices = await page.locator('[data-listing_intent="sell"]').evaluate_all(
-							"elements => elements.map(e => e.getAttribute('data-listing_price'))"
-						)
-						
-						logger.info(f"[DEBUG] Нашёл {len(sell_prices)} sell объявлений в classifieds для {item}: {sell_prices}")
-						
-						if self.price_mode == "first":
-							price_texts = sell_prices[:1]
-						elif self.price_mode == "avg23" and len(sell_prices) >= 3:
-							price_texts = sell_prices[1:3]
+						if use_classifieds:
+							logger.info(f"[Arbitrage] Используем classifieds для {item} (сложные атрибуты)")
+							
+							# Используем classifieds для sell (как для buy)
+							item_enc = quote(item_attrs["base_name"], safe="")
+							australium_param = "1" if item_attrs["australium"] else "-1"
+							
+							base_url = (
+								f"https://backpack.tf/classifieds?item={item_enc}"
+								f"&quality={item_attrs['quality']}&tradable=1&craftable=1&australium={australium_param}&killstreak_tier={item_attrs['killstreak_tier']}"
+							)
+							
+							# Получаем sell цены через classifieds
+							url = base_url
+							logger.info(f"[Arbitrage][SELL] Classifieds URL → {url}")
+							await page.goto(url, timeout=90000, wait_until="domcontentloaded")
+							await asyncio.sleep(self.delays["page_load"])
+							await page.locator('[data-listing_intent="sell"]').first.wait_for(state="attached", timeout=90000)
+							await _load_all_classifieds_orders(page)
+							
+							sell_prices = await page.locator('[data-listing_intent="sell"]').evaluate_all(
+								"elements => elements.map(e => e.getAttribute('data-listing_price'))"
+							)
+							
+							logger.info(f"[DEBUG] Нашёл {len(sell_prices)} sell объявлений в classifieds для {item}: {sell_prices}")
+							
+							if self.price_mode == "first":
+								price_texts = sell_prices[:1]
+							elif self.price_mode == "avg23" and len(sell_prices) >= 3:
+								price_texts = sell_prices[1:3]
+							else:
+								price_texts = sell_prices[:1]
+							
+							values = []
+							currency = None
+							for pt in price_texts:
+								val, curr = parse_price(pt)
+								if val is not None:
+									values.append(val)
+									if not currency:
+										currency = curr
+							
+							if values:
+								avg_value = sum(values) / len(values)
+								rounded_value = round(avg_value, 2)
+								self.cached_sell[item] = rounded_value
+								price_text = f"{rounded_value:.2f} {currency}"
+								source = "ClassifiedsSell"
+								logger.info(f"[Arbitrage] Цена {item} (sell): {price_text} ({source})")
+								results[item] = {
+									"value": rounded_value,
+									"currency": currency,
+									"source": source
+								}
+							else:
+								raise Exception("Не удалось разобрать цены из classifieds")
+							
 						else:
-							price_texts = sell_prices[:1]
-						
-						values = []
-						currency = None
-						for pt in price_texts:
-							val, curr = parse_price(pt)
-							if val is not None:
-								values.append(val)
-								if not currency:
-									currency = curr
-						
-						if values:
-							avg_value = sum(values) / len(values)
-							rounded_value = round(avg_value, 2)
-							self.cached_sell[item] = rounded_value
-							price_text = f"{rounded_value:.2f} {currency}"
-							source = "ClassifiedsSell"
-							logger.info(f"[Arbitrage] Цена {item} (sell): {price_text} ({source})")
-							results[item] = {
-								"value": rounded_value,
-								"currency": currency,
-								"source": source
-							}
-						else:
-							raise Exception("Не удалось разобрать цены из classifieds")
-						
-					else:
-						logger.info(f"[Arbitrage] Используем stats для {item} (простые атрибуты)")
-						
-						# Используем stats для простых предметов
-						if item_attrs["quality"] == 11:
-							quality_str = "Strange"
-						else:
-							quality_str = "Unique"
-						
-						item_enc = quote(item_attrs["base_name"], safe="")
-						url = f"https://backpack.tf/stats/{quality_str}/{item_enc}/Tradable/Craftable"
-						
-						logger.info(f"[Arbitrage][SELL] Stats URL → {url}")
-						await page.goto(url, timeout=90000, wait_until="domcontentloaded")
-						logger.info(f"[Arbitrage][SELL] At → {page.url}")
+							logger.info(f"[Arbitrage] Используем stats для {item} (простые атрибуты)")
+							
+							# Используем stats для простых предметов
+							if item_attrs["quality"] == 11:
+								quality_str = "Strange"
+							else:
+								quality_str = "Unique"
+							
+							item_enc = quote(item_attrs["base_name"], safe="")
+							url = f"https://backpack.tf/stats/{quality_str}/{item_enc}/Tradable/Craftable"
+							
+							logger.info(f"[Arbitrage][SELL] Stats URL → {url}")
+							await page.goto(url, timeout=90000, wait_until="domcontentloaded")
+							logger.info(f"[Arbitrage][SELL] At → {page.url}")
 
-						selector = 'div.item[data-listing_intent="sell"]'
-						await page.locator(selector).first.wait_for(state="attached", timeout=90000)
+							selector = 'div.item[data-listing_intent="sell"]'
+							await page.locator(selector).first.wait_for(state="attached", timeout=90000)
 
-						prices = await page.locator(selector).evaluate_all(
-							"elements => elements.map(e => e.getAttribute('data-listing_price'))"
-						)
+							prices = await page.locator(selector).evaluate_all(
+								"elements => elements.map(e => e.getAttribute('data-listing_price'))"
+							)
 
-						logger.info(f"[DEBUG] Нашёл {len(prices)} объявлений для {item} (sell): {prices}")
+							logger.info(f"[DEBUG] Нашёл {len(prices)} объявлений для {item} (sell): {prices}")
 
-						if self.price_mode == "first":
-							price_texts = prices[:1]
-						elif self.price_mode == "avg23" and len(prices) >= 3:
-							price_texts = prices[1:3]
-						else:
-							price_texts = prices[:1]
+							if self.price_mode == "first":
+								price_texts = prices[:1]
+							elif self.price_mode == "avg23" and len(prices) >= 3:
+								price_texts = prices[1:3]
+							else:
+								price_texts = prices[:1]
 
-						values = []
-						currency = None
-						for pt in price_texts:
-							val, curr = parse_price(pt)
-							if val is not None:
-								values.append(val)
-								if not currency:
-									currency = curr
+							values = []
+							currency = None
+							for pt in price_texts:
+								val, curr = parse_price(pt)
+								if val is not None:
+									values.append(val)
+									if not currency:
+										currency = curr
 
-						if values:
-							avg_value = sum(values) / len(values)
-							rounded_value = round(avg_value, 2)
-							self.cached_sell[item] = rounded_value
-							price_text = f"{rounded_value:.2f} {currency}"
-							source = "SELLOrders"
-							logger.info(f"[Arbitrage] Цена {item} (sell): {price_text} ({source})")
-							results[item] = {
-								"value": rounded_value,
-								"currency": currency,
-								"source": source
-							}
-						else:
-							raise Exception("Не удалось разобрать цены")
+							if values:
+								avg_value = sum(values) / len(values)
+								rounded_value = round(avg_value, 2)
+								self.cached_sell[item] = rounded_value
+								price_text = f"{rounded_value:.2f} {currency}"
+								source = "SELLOrders"
+								logger.info(f"[Arbitrage] Цена {item} (sell): {price_text} ({source})")
+								results[item] = {
+									"value": rounded_value,
+									"currency": currency,
+									"source": source
+								}
+							else:
+								raise Exception("Не удалось разобрать цены")
 
 					# Если успешно обработали, выходим из retry цикла
 					break
@@ -577,6 +798,18 @@ class UpgradeArbitrage:
 			if self.buy_items:
 				results["buy"] = await self.fetch_prices(page, self.buy_items, "buy")
 
+			# Анализ рентабельности апгрейдов (если указаны предметы)
+			if self.upgrade_analysis_items:
+				logger.info(f"[Arbitrage] Запускаю анализ рентабельности апгрейдов для {len(self.upgrade_analysis_items)} предметов")
+				await asyncio.sleep(self.delays["between_requests"])
+				
+				try:
+					upgrade_results = await self.analyze_multiple_upgrades(page, self.upgrade_analysis_items)
+					results["upgrade_analysis"] = upgrade_results
+				except Exception as e:
+					logger.error(f"[Arbitrage] Ошибка при анализе апгрейдов: {e}")
+					results["upgrade_analysis"] = {"error": str(e)}
+
 			await browser.close()
 			
 			# Статистика производительности
@@ -585,6 +818,82 @@ class UpgradeArbitrage:
 			avg_time_per_item = total_time / total_items if total_items > 0 else 0
 			
 			logger.info(f"[Arbitrage] Статистика: общее время={total_time:.2f}с, предметов={total_items}, среднее время на предмет={avg_time_per_item:.2f}с")
+		return results
+
+	async def run_upgrade_analysis(self, base_items: list = None, kit_types: list = None):
+		"""
+		Запускает только анализ рентабельности апгрейдов
+		
+		Args:
+			base_items: список базовых предметов для анализа (если не указан, используется self.upgrade_analysis_items)
+			kit_types: список типов китов для анализа (по умолчанию ["specialized", "professional"])
+		
+		Returns:
+			Результаты анализа апгрейдов
+		"""
+		if base_items is None:
+			base_items = self.upgrade_analysis_items
+		
+		if not base_items:
+			logger.error("[Upgrade Analysis] Не указаны предметы для анализа апгрейдов")
+			return None
+		
+		logger.info(f"[Upgrade Analysis] Запускаю анализ апгрейдов для {len(base_items)} предметов")
+		
+		start_time = asyncio.get_event_loop().time()
+		results = {}
+		
+		async with async_playwright() as p:
+			browser = await p.chromium.launch(headless=False, args=["--no-sandbox"])
+			context = await browser.new_context(
+				user_agent=(
+					"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+					"AppleWebKit/537.36 (KHTML, like Gecko) "
+					"Chrome/120.0.0.0 Safari/537.36"
+				),
+				locale="en-US",
+				java_script_enabled=True,
+				viewport={"width": 1366, "height": 768},
+			)
+			
+			# Куки (если есть)
+			if self.cookies_file.exists():
+				try:
+					raw = json.loads(self.cookies_file.read_text())
+					norm = []
+					for c in raw:
+						c = dict(c)
+						if "expires" in c and not isinstance(c.get("expires"), (int, float)):
+							c.pop("expires")
+						d = c.get("domain")
+						if d and not d.startswith("."):
+							c["domain"] = f".{d}"
+						c.setdefault("sameSite", "Lax")
+						norm.append(c)
+					await context.add_cookies(norm)
+					logger.info("[Upgrade Analysis] Куки подгружены")
+				except Exception as e:
+					logger.error(f"[Upgrade Analysis] Ошибка при загрузке куки: {e}")
+
+			page = await context.new_page()
+			await page.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9"})
+			
+			# Прогрев через ключ
+			await page.goto("https://backpack.tf/stats/Unique/Mann%20Co.%20Supply%20Crate%20Key/Tradable/Craftable", 
+							timeout=90000, wait_until="domcontentloaded")
+			
+			# Определяем цену ключа
+			self.runtime_key_price_ref = await self._detect_key_price_ref(page)
+			
+			# Запускаем анализ
+			results = await self.analyze_multiple_upgrades(page, base_items, kit_types)
+			
+			await browser.close()
+			
+			# Статистика
+			total_time = asyncio.get_event_loop().time() - start_time
+			logger.info(f"[Upgrade Analysis] Анализ завершён за {total_time:.2f}с")
+		
 		return results
 
 
@@ -614,5 +923,40 @@ def test_parse_item_attributes():
 		print(f"{item:50} → quality={attrs['quality']}, killstreak_tier={attrs['killstreak_tier']}, australium={attrs['australium']}, base_name='{attrs['base_name']}'")
 
 
+async def test_upgrade_analysis():
+	"""
+	Тестирует новую логику анализа рентабельности апгрейдов
+	"""
+	print("\n=== Тест анализа апгрейдов ===")
+	
+	# Создаём экземпляр класса
+	arbitrage = UpgradeArbitrage()
+	
+	# Тестовые предметы для анализа
+	test_items = ["Rocket Launcher", "Degreaser", "Ambassador"]
+	
+	print(f"Тестирую анализ апгрейдов для предметов: {test_items}")
+	print("Запускаю анализ...")
+	
+	try:
+		# Запускаем анализ
+		results = await arbitrage.run_upgrade_analysis(test_items)
+		
+		if results:
+			print("✅ Анализ апгрейдов успешно завершён!")
+			print(f"Результаты: {len(results)} предметов проанализировано")
+		else:
+			print("❌ Анализ апгрейдов не вернул результатов")
+			
+	except Exception as e:
+		print(f"❌ Ошибка при тестировании анализа апгрейдов: {e}")
+
+
 if __name__ == "__main__":
 	test_parse_item_attributes()
+	
+	# Запускаем тест анализа апгрейдов (если есть asyncio)
+	try:
+		asyncio.run(test_upgrade_analysis())
+	except Exception as e:
+		print(f"Тест анализа апгрейдов пропущен (требует asyncio): {e}")
