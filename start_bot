@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="${ROOT_DIR}/.venv"
+PYTHON_BIN="${PYTHON_BIN:-/usr/bin/python3}"
+PY_BIN="${VENV_DIR}/bin/python"
+PIP_BIN="${VENV_DIR}/bin/pip"
+PLAYWRIGHT_BIN="${VENV_DIR}/bin/playwright"
+
+echo "==> Using Python: ${PYTHON_BIN}"
+
+if [[ ! -d "${VENV_DIR}" ]]; then
+  echo "==> Creating virtual environment at ${VENV_DIR}"
+  "${PYTHON_BIN}" -m venv "${VENV_DIR}"
+fi
+
+echo "==> Upgrading pip/setuptools/wheel"
+"${PIP_BIN}" install --upgrade pip setuptools wheel
+
+echo "==> Installing Python dependencies"
+"${PIP_BIN}" install requests playwright beautifulsoup4
+
+echo "==> Installing Playwright browsers (Chromium)"
+"${PLAYWRIGHT_BIN}" install chromium
+
+echo "==> Running bot"
+"${PY_BIN}" "${ROOT_DIR}/main.py"
