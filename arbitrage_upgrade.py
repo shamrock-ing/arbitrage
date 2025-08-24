@@ -88,7 +88,9 @@ class UpgradeArbitrage:
 						f"https://backpack.tf/classifieds?item={item_enc}"
 						f"&quality={quality}&tradable=1&craftable=1&australium=-1&killstreak_tier=0"
 					)
+					logger.info(f"[Arbitrage][BUY] URL → {url_class}")
 					await page.goto(url_class, timeout=60000, wait_until="networkidle")
+					logger.info(f"[Arbitrage][BUY] At → {page.url}")
 
 					await page.locator('[data-listing_intent="sell"], [data-listing_intent="buy"]').first.wait_for(state="attached", timeout=60000)
 
@@ -135,7 +137,9 @@ class UpgradeArbitrage:
 					item_enc = quote(item_name, safe="")
 
 					url = f"https://backpack.tf/stats/{quality}/{item_enc}/Tradable/Craftable"
+					logger.info(f"[Arbitrage][SELL] URL → {url}")
 					await page.goto(url, timeout=60000, wait_until="networkidle")
+					logger.info(f"[Arbitrage][SELL] At → {page.url}")
 
 					selector = 'div.item[data-listing_intent="sell"]'
 					await page.locator(selector).first.wait_for(state="attached", timeout=60000)
