@@ -1,0 +1,21 @@
+{
+  "sell_items": [
+    "Strange Australium Ambassador",
+    "Strange Degreaser", 
+    "Strange Flame Thrower"
+  ],
+  "buy_items": [
+    "Strange Specialized Killstreak Rocket Launcher",
+    "Strange Specialized Killstreak Degreaser",
+    "Strange Specialized Killstreak Australium Ambassador"
+  ],
+  "price_mode": "avg23",
+  "upgrade_analysis_items": [
+    "Rocket Launcher",
+    "Degreaser",
+    "Ambassador",
+    "Flame Thrower",
+    "Scattergun",
+    "Medigun"
+  ]
+}
