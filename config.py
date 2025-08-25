@@ -1,9 +1,5 @@
 # === Backpack.tf API credentials ===
-# Ключ берётся тут: https://backpack.tf/developer (нужен доступ к classifieds API)
-
-BPTF_TOKEN = "68ab27423e917f020d016e46"         
-
-STEAM_ID = "76561198189472678"             
+# Ключ берётся тут: https://backpack.tf/developer (нужен доступ к classifieds API)            
 
 # === Pricing ===
 # Фикс/средняя цена Killstreak Kit (refined)
